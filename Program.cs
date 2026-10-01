@@ -48,6 +48,9 @@ sealed class Pad
     // Average position of the fingers touching, and how many fingers it covers.
     public double X, Y;
     public int YFingers;
+    // The same fingers one by one: contact ID and position.
+    public readonly uint[] Ids = new uint[8];
+    public readonly double[] Xs = new double[8], Ys = new double[8];
 }
 
 sealed partial class Watcher : NativeWindow
@@ -174,11 +177,11 @@ sealed partial class Watcher : NativeWindow
         if (_active == Action.FourFinger && _repeatKey == 0 && pad == _activePad) Slide(pad);
         if (_drag != Drag.None && pad == _dragPad)
         {
-            DragFingers(pad);
             // The hook can see the press before the pad's report does: only a release
             // after a seen press ends the drag.
             if (button) _dragPadPressed = true;
-            else if (_dragPadPressed) EndDrag("pad release");
+            if (!button && _dragPadPressed) EndDrag("pad release");
+            else DragFingers(pad);
         }
     }
 
@@ -201,6 +204,13 @@ sealed partial class Watcher : NativeWindow
             if (HidP_GetUsages(HidP_Input, 0x0D, link, _usages, ref n, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
                 || !_usages.Take((int)n).Contains((ushort)0x42))
                 continue;
+            if (fingers < pad.Ids.Length)
+            {
+                HidP_GetUsageValue(HidP_Input, 0x0D, link, 0x51, out uint id, pad.Preparsed, report, length);
+                pad.Ids[fingers] = id;
+                pad.Xs[fingers] = x;
+                pad.Ys[fingers] = y;
+            }
             sumX += x;
             sumY += y;
             fingers++;

@@ -22,6 +22,7 @@ static class Native
 
     public const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020, MOUSEEVENTF_MIDDLEUP = 0x0040;
+    public const uint MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004;
     public const uint MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010;
 
     public const uint GA_ROOT = 2;
@@ -86,6 +87,9 @@ static class Native
 
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    public static extern bool GetCursorPos(out POINT point);
 
     public delegate IntPtr HookProc(int code, IntPtr wParam, IntPtr lParam);
 

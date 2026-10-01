@@ -1,12 +1,13 @@
-// Two-finger click held and moved = drag the window under the cursor, from any
-// point of it, not just the title bar. Released without moving = the ordinary
-// right click, sent on release.
+// Physical click with 2 fingers, held, both fingers moving together = drag the window
+// under the cursor, from any point of it, not just the title bar.
 //
-// Windows turns a two-finger click into a right button press; the hook swallows it
-// and waits. Moving past DragStartPx makes it a window drag. With the button held,
-// Windows may not move the cursor at all, so the fingers' own travel from the raw
-// reports drives the drag (and the cursor); cursor moves, if Windows does send them,
-// drive it instead.
+// Windows turns such a press into a left button (one finger holds the click, the
+// other drags a selection) or a right click, and the hook cannot tell which the user
+// means at press time. So the press is held back and the fingers decide:
+//   both fingers travel        -> window drag;
+//   one travels, one stays     -> the held-back press is replayed, a normal selection;
+//   released without travel    -> the held-back press is replayed as a click.
+// The drag ends on the pad's own release: Windows sometimes lets go of the button early.
 
 using System.Runtime.InteropServices;
 using static TrackpadClicks.Native;
@@ -15,134 +16,137 @@ namespace TrackpadClicks;
 
 sealed partial class Watcher
 {
-    enum Drag { None, Pending, Moving }
+    enum Drag { None, Pending, Moving, Passing }
 
-    const int DragStartPx = 8;
+    // Finger travel, as a share of the pad's width, that counts as moving (~4 mm).
+    const double FingerMoves = 0.025;
     // Full pad width moves the window this many primary-screen widths.
     const double DragGain = 1.5;
-    // Shell windows that must keep their own right click.
+    // Shell windows that keep their own clicks.
     static readonly HashSet<string> Unmovable = new() { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
 
     Drag _drag;
-    bool _dragByFingers;
     Pad? _dragPad;
-    double _fingerX, _fingerY, _offX, _offY;
-    int _fingerCount;
+    bool _dragPadPressed;
+    bool _dragRight;          // the held-back press was a right button
+    bool _upSeen, _swallowUp;
     IntPtr _dragWindow;
     POINT _dragFrom;
     RECT _windowFrom;
-    int _dragMoves, _dragWheels;
     long _dragStart;
-    bool _rightUpSeen, _swallowRightUp, _dragPadPressed;
+    // Pending: where each finger was at the press, by contact ID.
+    readonly Dictionary<uint, (double X, double Y)> _fingerStart = new();
+    // Moving: average finger position last seen, finger count, travel in pixels.
+    double _fingerX, _fingerY, _offX, _offY;
+    int _fingerCount;
 
     // Returns true when the event is consumed.
     bool DragHook(int msg, MSLLHOOKSTRUCT info)
     {
+        bool down = msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN;
+        bool up = msg is WM_LBUTTONUP or WM_RBUTTONUP;
+
         if (_drag == Drag.None)
         {
             // The drag ended on the pad's own release before Windows sent its button up.
-            if (msg == WM_RBUTTONUP && _swallowRightUp)
+            if (up && _swallowUp)
             {
-                _swallowRightUp = false;
+                _swallowUp = false;
                 return true;
             }
-            var pad = msg == WM_RBUTTONDOWN && _active == Action.None ? TwoFingerPad() : null;
+            var pad = down && _active == Action.None ? TwoFingerPad() : null;
             if (pad == null) return false;
             var window = MovableWindowAt(info.X, info.Y);
             if (window == IntPtr.Zero) return false;
             _drag = Drag.Pending;
-            _dragByFingers = false;
             _dragPad = pad;
-            _fingerX = pad.X;
-            _fingerY = pad.Y;
-            _fingerCount = pad.YFingers;
-            _offX = _offY = 0;
+            _dragPadPressed = pad.Button;
+            _dragRight = msg == WM_RBUTTONDOWN;
+            _upSeen = _swallowUp = false;
             _dragWindow = window;
             _dragFrom = new POINT { X = info.X, Y = info.Y };
-            _dragMoves = _dragWheels = 0;
             _dragStart = Environment.TickCount64;
-            _rightUpSeen = _swallowRightUp = false;
-            _dragPadPressed = pad.Button;
+            _fingerStart.Clear();
+            for (int i = 0; i < Math.Min(pad.YFingers, pad.Ids.Length); i++)
+                _fingerStart[pad.Ids[i]] = (pad.Xs[i], pad.Ys[i]);
             return true;
+        }
+
+        if (_drag == Drag.Passing)
+        {
+            if (up) EndDrag("button up");
+            return false;
         }
 
         switch (msg)
         {
             case WM_MOUSEMOVE:
-                if (_dragByFingers) return false;
-                _dragMoves++;
-                Follow(info.X, info.Y);
-                return false;
+                // While moving, the cursor follows the fingers, not Windows.
+                return _drag == Drag.Moving;
             case WM_MOUSEWHEEL or WM_MOUSEHWHEEL:
-                // Two fingers moving may read as a scroll; it must not reach the app mid-drag.
-                _dragWheels++;
                 return true;
-            case WM_RBUTTONDOWN:
-                return true;
-            case WM_RBUTTONUP:
-                // Windows may let go of the right button while the pad is still pressed;
-                // the pad's own release ends the drag then.
-                _rightUpSeen = true;
-                if (_dragPadPressed && _dragPad is { Button: true }) return true;
-                EndDrag("button up");
-                return true;
+        }
+        if (down) return true;
+        if (up)
+        {
+            // Windows may let go early while the pad is still pressed; the pad's own
+            // release ends the drag then.
+            _upSeen = true;
+            if (!(_dragPadPressed && _dragPad is { Button: true })) EndDrag("button up");
+            return true;
         }
         return false;
     }
 
-    void EndDrag(string by)
-    {
-        if (_drag == Drag.Pending)
-        {
-            Mouse(MOUSEEVENTF_RIGHTDOWN);
-            Mouse(MOUSEEVENTF_RIGHTUP);
-        }
-        Log.Write($"two-finger {(_drag == Drag.Moving ? "drag" : "right click")}{(_dragByFingers ? " by fingers" : "")}"
-                  + $" {Environment.TickCount64 - _dragStart} ms, ended by {by}, right up {(_rightUpSeen ? "early" : "pending")}, {_dragMoves} moves, {_dragWheels} wheels");
-        _swallowRightUp = !_rightUpSeen;
-        _drag = Drag.None;
-        _dragPad = null;
-        _dragWindow = IntPtr.Zero;
-    }
-
-    // Raw report from the dragging pad: used unless Windows is moving the cursor itself.
+    // Raw report from the pad the press came from.
     void DragFingers(Pad pad)
     {
-        if (_dragMoves > 0 && !_dragByFingers) return;
-        if (pad.YFingers == 0) return;
-        if (pad.YFingers != _fingerCount)
-        {
-            _fingerX = pad.X;
-            _fingerY = pad.Y;
-            _fingerCount = pad.YFingers;
-            return;
-        }
-        double scale = Screen.PrimaryScreen!.Bounds.Width * DragGain / Math.Max(1, pad.XMax - pad.XMin);
-        _offX += (pad.X - _fingerX) * scale;
-        _offY += (pad.Y - _fingerY) * scale;
-        _fingerX = pad.X;
-        _fingerY = pad.Y;
-        int x = _dragFrom.X + (int)Math.Round(_offX), y = _dragFrom.Y + (int)Math.Round(_offY);
-        if (_drag == Drag.Pending && Math.Abs(_offX) + Math.Abs(_offY) >= DragStartPx) _dragByFingers = true;
-        if (!_dragByFingers) return;
-        Follow(x, y);
-        SetCursorPos(x, y);
+        if (_drag == Drag.Pending) Decide(pad);
+        else if (_drag == Drag.Moving) MoveWindow(pad);
     }
 
-    // The grabbed point is now at (x, y).
-    void Follow(int x, int y)
+    void Decide(Pad pad)
     {
-        if (_drag == Drag.Pending && Math.Abs(x - _dragFrom.X) + Math.Abs(y - _dragFrom.Y) >= DragStartPx)
-            BeginMove();
-        if (_drag == Drag.Moving)
-            SetWindowPos(_dragWindow, IntPtr.Zero,
-                _windowFrom.Left + x - _dragFrom.X, _windowFrom.Top + y - _dragFrom.Y, 0, 0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        double width = Math.Max(1, pad.XMax - pad.XMin);
+        int moving = 0, still = 0;
+        for (int i = 0; i < Math.Min(pad.YFingers, pad.Ids.Length); i++)
+        {
+            if (!_fingerStart.TryGetValue(pad.Ids[i], out var start))
+            {
+                _fingerStart[pad.Ids[i]] = (pad.Xs[i], pad.Ys[i]);
+                continue;
+            }
+            double travel = Math.Sqrt(Math.Pow(pad.Xs[i] - start.X, 2) + Math.Pow(pad.Ys[i] - start.Y, 2)) / width;
+            if (travel >= FingerMoves) moving++;
+            else if (travel < FingerMoves / 2) still++;
+        }
+
+        if (moving >= 2)
+        {
+            BeginMove(pad);
+        }
+        else if (moving == 1 && (still >= 1 || pad.YFingers == 1))
+        {
+            // A selection: hand the press back where it happened, cursor where it is now.
+            _drag = Drag.Passing;
+            GetCursorPos(out var now);
+            SetCursorPos(_dragFrom.X, _dragFrom.Y);
+            Mouse(_dragRight ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
+            SetCursorPos(now.X, now.Y);
+        }
     }
 
-    void BeginMove()
+    void BeginMove(Pad pad)
     {
         _drag = Drag.Moving;
+        _fingerX = pad.X;
+        _fingerY = pad.Y;
+        _fingerCount = pad.YFingers;
+        // The cursor may have drifted while undecided: the grabbed point follows it.
+        GetCursorPos(out var now);
+        _offX = now.X - _dragFrom.X;
+        _offY = now.Y - _dragFrom.Y;
+
         SetForegroundWindow(_dragWindow);
         GetWindowRect(_dragWindow, out var rect);
         var placement = new WINDOWPLACEMENT { Length = Marshal.SizeOf<WINDOWPLACEMENT>() };
@@ -161,6 +165,46 @@ sealed partial class Watcher
             };
         }
         _windowFrom = rect;
+        MoveWindow(pad);
+    }
+
+    void MoveWindow(Pad pad)
+    {
+        if (pad.YFingers == 0) return;
+        // A finger landing or lifting jumps the average; measure afresh from here.
+        if (pad.YFingers != _fingerCount)
+        {
+            _fingerX = pad.X;
+            _fingerY = pad.Y;
+            _fingerCount = pad.YFingers;
+            return;
+        }
+        double scale = Screen.PrimaryScreen!.Bounds.Width * DragGain / Math.Max(1, pad.XMax - pad.XMin);
+        _offX += (pad.X - _fingerX) * scale;
+        _offY += (pad.Y - _fingerY) * scale;
+        _fingerX = pad.X;
+        _fingerY = pad.Y;
+        int dx = (int)Math.Round(_offX), dy = (int)Math.Round(_offY);
+        SetWindowPos(_dragWindow, IntPtr.Zero, _windowFrom.Left + dx, _windowFrom.Top + dy, 0, 0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+        SetCursorPos(_dragFrom.X + dx, _dragFrom.Y + dy);
+    }
+
+    void EndDrag(string by)
+    {
+        // Released without travel: the held-back press becomes the click it was.
+        if (_drag == Drag.Pending)
+        {
+            Mouse(_dragRight ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
+            Mouse(_dragRight ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP);
+        }
+        Log.Write($"two-finger {(_dragRight ? "right" : "left")} press -> {_drag switch { Drag.Moving => "window drag", Drag.Passing => "selection", _ => "click" }}"
+                  + $", {Environment.TickCount64 - _dragStart} ms, ended by {by}");
+        // In Passing the real button up went through to the app already.
+        _swallowUp = _drag != Drag.Passing && !_upSeen;
+        _drag = Drag.None;
+        _dragPad = null;
+        _dragWindow = IntPtr.Zero;
     }
 
     // A pad with exactly 2 fingers on it right now, if any.
