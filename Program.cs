@@ -149,14 +149,18 @@ sealed class Watcher : NativeWindow
         if (_active == Action.FourFinger && pad == _activePad) Slide(pad);
     }
 
-    // Each finger is its own link collection holding a tip switch and X/Y.
+    // Each finger is its own link collection holding a tip switch and X/Y. The Magic
+    // Trackpad driver fills only the first `Contacts` of them; the rest hold leftover
+    // memory, sometimes with the tip switch set, so only those first slots are read.
     void ReadFingers(Pad pad, IntPtr report, uint length)
     {
         double sum = 0;
         int fingers = 0;
-        for (ushort link = 1; link < pad.LinkCollections; link++)
+        int slots = Math.Min(pad.Contacts, pad.LinkCollections - 1);
+        for (ushort link = 1; link <= slots; link++)
         {
-            if (HidP_GetUsageValue(HidP_Input, 0x01, link, 0x31, out uint y, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS)
+            if (HidP_GetUsageValue(HidP_Input, 0x01, link, 0x31, out uint y, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
+                || y < pad.YMin || y > pad.YMax)
                 continue;
             uint n = (uint)_usages.Length;
             if (HidP_GetUsages(HidP_Input, 0x0D, link, _usages, ref n, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
