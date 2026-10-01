@@ -1,6 +1,9 @@
 // Physical click with 3 fingers = middle button.
-// Physical click with 4+ fingers: release in place = media play/pause;
-// hold and slide up/down = volume, set continuously as the fingers travel.
+// Physical click with 4+ fingers, by where the fingers are on the pad:
+//   top third    = volume up a step; held, it repeats like a held key;
+//   bottom third = the same, down;
+//   middle third = release in place for media play/pause, or hold and slide
+//                  up/down to set the volume continuously as the fingers travel.
 // Taps are left to Windows settings (turned off there); this only remaps real clicks.
 //
 // Finger count, finger positions and button state come from the precision touchpad's
@@ -55,6 +58,8 @@ sealed class Watcher : NativeWindow
     const double StillTravel = 0.02;
     // After the volume key that brings up the flyout, wait at most this long for it to land.
     const long KeySettleMs = 150;
+    // Held top/bottom click: first repeat after this, then one step per RepeatMs.
+    const int RepeatDelayMs = 350, RepeatMs = 60;
 
     readonly HookProc _hookProc;
     readonly IntPtr _hook;
@@ -79,6 +84,10 @@ sealed class Watcher : NativeWindow
     long _keySent;
     bool _keyLanded;
 
+    // Top/bottom four-finger click: the volume key it repeats while held.
+    readonly System.Windows.Forms.Timer _repeat = new();
+    ushort _repeatKey;
+
     public Watcher()
     {
         CreateHandle(new CreateParams());
@@ -88,6 +97,11 @@ sealed class Watcher : NativeWindow
         _hookProc = Hook;
         _hook = SetWindowsHookEx(WH_MOUSE_LL, _hookProc, GetModuleHandle(null), 0);
         if (_hook == IntPtr.Zero) Log.Write($"SetWindowsHookEx failed {Marshal.GetLastWin32Error()}");
+        _repeat.Tick += (_, _) =>
+        {
+            _repeat.Interval = RepeatMs;
+            Key(_repeatKey);
+        };
     }
 
     protected override void WndProc(ref Message m)
@@ -154,7 +168,7 @@ sealed class Watcher : NativeWindow
         }
         pad.Button = button;
 
-        if (_active == Action.FourFinger && pad == _activePad) Slide(pad);
+        if (_active == Action.FourFinger && _repeatKey == 0 && pad == _activePad) Slide(pad);
     }
 
     // Each finger is its own link collection holding a tip switch and X/Y. The Magic
@@ -275,13 +289,22 @@ sealed class Watcher : NativeWindow
             _anchorFingers = pad.YFingers;
             _travel = 0;
             _sliding = false;
+            // Y grows downward; with no finger positions fall back to the middle zone.
+            double at = pad.YFingers > 0 ? (pad.Y - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin) : 0.5;
+            _repeatKey = at < 1.0 / 3 ? VK_VOLUME_UP : at > 2.0 / 3 ? VK_VOLUME_DOWN : (ushort)0;
+            if (_repeatKey != 0)
+            {
+                Key(_repeatKey);
+                _repeat.Interval = RepeatDelayMs;
+                _repeat.Start();
+            }
         }
         else
         {
             _active = Action.Middle;
             Mouse(MOUSEEVENTF_MIDDLEDOWN);
         }
-        Log.Write($"{_active} ({fingers} fingers)");
+        Log.Write($"{_active} ({fingers} fingers){(_repeatKey == VK_VOLUME_UP ? " top" : _repeatKey == VK_VOLUME_DOWN ? " bottom" : "")}");
     }
 
     void End()
@@ -289,7 +312,9 @@ sealed class Watcher : NativeWindow
         if (_active == Action.Middle) Mouse(MOUSEEVENTF_MIDDLEUP);
         if (_active == Action.FourFinger)
         {
-            if (!_sliding)
+            _repeat.Stop();
+            if (_repeatKey != 0) _repeatKey = 0;
+            else if (!_sliding)
             {
                 Key(VK_MEDIA_PLAY_PAUSE);
                 Log.Write("play/pause");
