@@ -1,9 +1,11 @@
-// Physical click with 3 fingers = middle button, with 4+ fingers = media play/pause.
+// Physical click with 3 fingers = middle button.
+// Physical click with 4+ fingers: release in place = media play/pause;
+// hold and slide up/down = volume, continuously, as far as the fingers travel.
 // Taps are left to Windows settings (turned off there); this only remaps real clicks.
 //
-// Finger count and button state come from the precision touchpad's raw HID reports.
-// The left/right click Windows synthesizes for the same press is swallowed by a
-// low-level mouse hook. Both run on the one UI thread, so no locking is needed.
+// Finger count, finger positions and button state come from the precision touchpad's
+// raw HID reports. The left/right click Windows synthesizes for the same press is
+// swallowed by a low-level mouse hook. Both run on the one UI thread, so no locking.
 
 using System.Runtime.InteropServices;
 using static TrackpadClicks.Native;
@@ -24,29 +26,50 @@ static class Program
     }
 }
 
-enum Action { None, Middle, PlayPause }
+enum Action { None, Middle, FourFinger }
+
+// One touchpad. The built-in ASUS pad streams reports too (here: constantly "pressed",
+// 0 fingers), so every touchpad keeps its own state.
+sealed class Pad
+{
+    public IntPtr Preparsed;
+    public ushort LinkCollections;
+    public int YMin, YMax;
+
+    public int Contacts;
+    public long LastReport;
+    public bool Button;
+    // Average Y of the fingers touching, and how many fingers that average covers.
+    public double Y;
+    public int YFingers;
+}
 
 sealed class Watcher : NativeWindow
 {
     // Our own SendInput calls carry this tag, though the hook already skips injected input.
     static readonly IntPtr Tag = new(0x7C11C);
     const long FreshMs = 250;
+    // One volume key (= 2% in Windows) per this share of the pad's height: full height = 50%.
+    const double VolumeStep = 1.0 / 25;
+    // Less travel than this on a four-finger click still counts as play/pause.
+    const double StillTravel = 0.03;
 
     readonly HookProc _hookProc;
     readonly IntPtr _hook;
-    readonly Dictionary<IntPtr, IntPtr> _preparsed = new();
+    readonly Dictionary<IntPtr, Pad?> _pads = new();
     readonly ushort[] _usages = new ushort[32];
-
-    // The built-in ASUS pad streams reports too (here: constantly "pressed", 0 fingers),
-    // so every touchpad keeps its own state.
-    sealed class Pad { public int Contacts; public long LastReport; public bool Button; }
-    readonly Dictionary<IntPtr, Pad> _pads = new();
     readonly bool _debug = File.Exists(@"C:\TrackpadClicks\debug");
 
     Action _active;
     Pad? _activePad;
     bool _swallowing;
     bool _loggedParseError;
+
+    // Four-finger hold: Y the next volume step is measured from, total travel so far.
+    double _anchorY;
+    int _anchorFingers;
+    double _travel;
+    int _volumeSteps;
 
     public Watcher()
     {
@@ -77,21 +100,21 @@ sealed class Watcher : NativeWindow
             if (GetRawInputData(handle, RID_INPUT, buf, ref size, headerSize) != size) return;
             var header = Marshal.PtrToStructure<RAWINPUTHEADER>(buf);
             if (header.Type != RIM_TYPEHID) return;
-            IntPtr preparsed = Preparsed(header.Device);
-            if (preparsed == IntPtr.Zero) return;
+            var pad = GetPad(header.Device);
+            if (pad == null) return;
 
             uint reportSize = (uint)Marshal.ReadInt32(buf, (int)headerSize);
             uint count = (uint)Marshal.ReadInt32(buf, (int)headerSize + 4);
             IntPtr report = buf + (int)headerSize + 8;
             for (uint i = 0; i < count; i++, report += (int)reportSize)
-                OnReport(header.Device, preparsed, report, reportSize);
+                OnReport(header.Device, pad, report, reportSize);
         }
         finally { Marshal.FreeHGlobal(buf); }
     }
 
-    void OnReport(IntPtr device, IntPtr preparsed, IntPtr report, uint length)
+    void OnReport(IntPtr device, Pad pad, IntPtr report, uint length)
     {
-        int status = HidP_GetUsageValue(HidP_Input, 0x0D, 0, 0x54, out uint contacts, preparsed, report, length);
+        int status = HidP_GetUsageValue(HidP_Input, 0x0D, 0, 0x54, out uint contacts, pad.Preparsed, report, length);
         if (status != HIDP_STATUS_SUCCESS)
         {
             if (!_loggedParseError) Log.Write($"contact count parse failed 0x{status:X}");
@@ -99,18 +122,19 @@ sealed class Watcher : NativeWindow
             return;
         }
         uint n = (uint)_usages.Length;
-        bool button = HidP_GetUsages(HidP_Input, 0x09, 0, _usages, ref n, preparsed, report, length) == HIDP_STATUS_SUCCESS
+        bool button = HidP_GetUsages(HidP_Input, 0x09, 0, _usages, ref n, pad.Preparsed, report, length) == HIDP_STATUS_SUCCESS
                       && _usages.Take((int)n).Contains((ushort)1);
 
-        if (!_pads.TryGetValue(device, out var pad)) _pads[device] = pad = new Pad();
         pad.Contacts = (int)contacts;
         pad.LastReport = Environment.TickCount64;
+        if (pad.Contacts > 0) ReadFingers(pad, report, length);
+        else pad.YFingers = 0;
 
         if (button != pad.Button && _debug)
         {
             var bytes = new byte[length];
             Marshal.Copy(report, bytes, 0, (int)length);
-            Log.Write($"dev {device} {(button ? "down" : "up")} {contacts} fingers {Convert.ToHexString(bytes)}");
+            Log.Write($"dev {device} {(button ? "down" : "up")} {contacts} fingers y {pad.Y:F0}/{pad.YFingers} {Convert.ToHexString(bytes)}");
         }
         if (button && !pad.Button)
         {
@@ -121,6 +145,53 @@ sealed class Watcher : NativeWindow
             End();
         }
         pad.Button = button;
+
+        if (_active == Action.FourFinger && pad == _activePad) Slide(pad);
+    }
+
+    // Each finger is its own link collection holding a tip switch and X/Y.
+    void ReadFingers(Pad pad, IntPtr report, uint length)
+    {
+        double sum = 0;
+        int fingers = 0;
+        for (ushort link = 1; link < pad.LinkCollections; link++)
+        {
+            if (HidP_GetUsageValue(HidP_Input, 0x01, link, 0x31, out uint y, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS)
+                continue;
+            uint n = (uint)_usages.Length;
+            if (HidP_GetUsages(HidP_Input, 0x0D, link, _usages, ref n, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
+                || !_usages.Take((int)n).Contains((ushort)0x42))
+                continue;
+            sum += y;
+            fingers++;
+        }
+        pad.Y = fingers > 0 ? sum / fingers : 0;
+        pad.YFingers = fingers;
+    }
+
+    void Slide(Pad pad)
+    {
+        if (pad.YFingers == 0) return;
+        // A finger landing or lifting jumps the average; start measuring afresh.
+        if (pad.YFingers != _anchorFingers)
+        {
+            _anchorY = pad.Y;
+            _anchorFingers = pad.YFingers;
+            return;
+        }
+        double height = Math.Max(1, pad.YMax - pad.YMin);
+        // Y grows downward: fingers moving up give a positive delta.
+        double delta = (_anchorY - pad.Y) / height;
+        while (Math.Abs(delta) >= VolumeStep)
+        {
+            int dir = Math.Sign(delta);
+            Key(dir > 0 ? VK_VOLUME_UP : VK_VOLUME_DOWN);
+            _volumeSteps += dir;
+            _travel += VolumeStep;
+            _anchorY -= dir * VolumeStep * height;
+            delta -= dir * VolumeStep;
+        }
+        _travel = Math.Max(_travel, Math.Abs(delta));
     }
 
     // A pad with 3+ fingers on it right now, if any.
@@ -128,7 +199,7 @@ sealed class Watcher : NativeWindow
     {
         long now = Environment.TickCount64;
         foreach (var pad in _pads.Values)
-            if (pad.Contacts >= 3 && now - pad.LastReport < FreshMs) return pad;
+            if (pad != null && pad.Contacts >= 3 && now - pad.LastReport < FreshMs) return pad;
         return null;
     }
 
@@ -167,8 +238,12 @@ sealed class Watcher : NativeWindow
         _activePad = pad;
         if (fingers >= 4)
         {
-            _active = Action.PlayPause;
-            Key(VK_MEDIA_PLAY_PAUSE);
+            // Play/pause waits for the release: a slide in between means volume instead.
+            _active = Action.FourFinger;
+            _anchorY = pad.Y;
+            _anchorFingers = pad.YFingers;
+            _travel = 0;
+            _volumeSteps = 0;
         }
         else
         {
@@ -181,6 +256,15 @@ sealed class Watcher : NativeWindow
     void End()
     {
         if (_active == Action.Middle) Mouse(MOUSEEVENTF_MIDDLEUP);
+        if (_active == Action.FourFinger)
+        {
+            if (_travel < StillTravel)
+            {
+                Key(VK_MEDIA_PLAY_PAUSE);
+                Log.Write("play/pause");
+            }
+            else Log.Write($"volume {_volumeSteps:+0;-0;0} steps");
+        }
         _active = Action.None;
         _activePad = null;
     }
@@ -199,24 +283,39 @@ sealed class Watcher : NativeWindow
 
     static void Send(INPUT input) => SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
 
-    IntPtr Preparsed(IntPtr device)
+    Pad? GetPad(IntPtr device)
     {
-        if (_preparsed.TryGetValue(device, out var p)) return p;
+        if (_pads.TryGetValue(device, out var pad)) return pad;
+        pad = null;
         uint size = 0;
         GetRawInputDeviceInfo(device, RIDI_PREPARSEDDATA, IntPtr.Zero, ref size);
-        p = IntPtr.Zero;
         if (size > 0)
         {
-            p = Marshal.AllocHGlobal((int)size);
-            if ((int)GetRawInputDeviceInfo(device, RIDI_PREPARSEDDATA, p, ref size) <= 0)
-            {
-                Marshal.FreeHGlobal(p);
-                p = IntPtr.Zero;
-            }
+            IntPtr p = Marshal.AllocHGlobal((int)size);
+            if ((int)GetRawInputDeviceInfo(device, RIDI_PREPARSEDDATA, p, ref size) > 0) pad = Describe(p);
+            else Marshal.FreeHGlobal(p);
         }
-        _preparsed[device] = p;
-        Log.Write($"touchpad {DeviceName(device)}");
-        return p;
+        _pads[device] = pad;
+        Log.Write($"touchpad {DeviceName(device)}, {pad?.LinkCollections} link collections, y {pad?.YMin}..{pad?.YMax}");
+        return pad;
+    }
+
+    static Pad Describe(IntPtr preparsed)
+    {
+        var pad = new Pad { Preparsed = preparsed };
+        // HIDP_CAPS: NumberLinkCollectionNodes sits after 5 lengths and 17 reserved USHORTs.
+        var caps = new byte[64];
+        if (HidP_GetCaps(preparsed, caps) == HIDP_STATUS_SUCCESS)
+            pad.LinkCollections = BitConverter.ToUInt16(caps, 44);
+        // HIDP_VALUE_CAPS is 72 bytes, LogicalMin/LogicalMax at 40/44.
+        var valueCaps = new byte[72 * 16];
+        ushort count = 16;
+        if (HidP_GetSpecificValueCaps(HidP_Input, 0x01, 0, 0x31, valueCaps, ref count, preparsed) == HIDP_STATUS_SUCCESS && count > 0)
+        {
+            pad.YMin = BitConverter.ToInt32(valueCaps, 40);
+            pad.YMax = BitConverter.ToInt32(valueCaps, 44);
+        }
+        return pad;
     }
 
     static string DeviceName(IntPtr device)

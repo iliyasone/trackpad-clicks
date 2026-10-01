@@ -22,7 +22,7 @@ static class Native
     public const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
     public const uint MOUSEEVENTF_MIDDLEDOWN = 0x0020, MOUSEEVENTF_MIDDLEUP = 0x0040;
     public const uint KEYEVENTF_EXTENDEDKEY = 0x1, KEYEVENTF_KEYUP = 0x2;
-    public const ushort VK_MEDIA_PLAY_PAUSE = 0xB3;
+    public const ushort VK_MEDIA_PLAY_PAUSE = 0xB3, VK_VOLUME_DOWN = 0xAE, VK_VOLUME_UP = 0xAF;
 
     [StructLayout(LayoutKind.Sequential)]
     public struct RAWINPUTDEVICE { public ushort UsagePage, Usage; public uint Flags; public IntPtr Target; }
@@ -67,6 +67,13 @@ static class Native
 
     [DllImport("user32.dll", SetLastError = true)]
     public static extern uint SendInput(uint count, INPUT[] inputs, int size);
+
+    [DllImport("hid.dll")]
+    public static extern int HidP_GetCaps(IntPtr preparsed, [Out] byte[] caps);
+
+    [DllImport("hid.dll")]
+    public static extern int HidP_GetSpecificValueCaps(int reportType, ushort usagePage, ushort linkCollection, ushort usage,
+        [Out] byte[] valueCaps, ref ushort valueCapsLength, IntPtr preparsed);
 
     [DllImport("hid.dll")]
     public static extern int HidP_GetUsageValue(int reportType, ushort usagePage, ushort linkCollection, ushort usage,
