@@ -4,6 +4,7 @@
 //   bottom third = the same, down;
 //   middle third = release in place for media play/pause, or hold and slide
 //                  up/down to set the volume continuously as the fingers travel.
+// Physical click with 2 fingers, held and moved = drag the window (WindowDrag.cs).
 // Taps are left to Windows settings (turned off there); this only remaps real clicks.
 //
 // Finger count, finger positions and button state come from the precision touchpad's
@@ -22,6 +23,8 @@ static class Program
     {
         using var mutex = new Mutex(true, @"Local\TrackpadClicks", out bool first);
         if (!first) return;
+        // Hook coordinates and window rects must both be physical pixels.
+        Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Log.Write("start");
         var watcher = new Watcher();
         Application.Run();
@@ -37,17 +40,17 @@ sealed class Pad
 {
     public IntPtr Preparsed;
     public ushort LinkCollections;
-    public int YMin, YMax;
+    public int XMin, XMax, YMin, YMax;
 
     public int Contacts;
     public long LastReport;
     public bool Button;
-    // Average Y of the fingers touching, and how many fingers that average covers.
-    public double Y;
+    // Average position of the fingers touching, and how many fingers it covers.
+    public double X, Y;
     public int YFingers;
 }
 
-sealed class Watcher : NativeWindow
+sealed partial class Watcher : NativeWindow
 {
     // Our own SendInput calls carry this tag, though the hook already skips injected input.
     static readonly IntPtr Tag = new(0x7C11C);
@@ -169,6 +172,7 @@ sealed class Watcher : NativeWindow
         pad.Button = button;
 
         if (_active == Action.FourFinger && _repeatKey == 0 && pad == _activePad) Slide(pad);
+        if (_drag != Drag.None && pad == _dragPad) DragFingers(pad);
     }
 
     // Each finger is its own link collection holding a tip switch and X/Y. The Magic
@@ -176,22 +180,26 @@ sealed class Watcher : NativeWindow
     // memory, sometimes with the tip switch set, so only those first slots are read.
     void ReadFingers(Pad pad, IntPtr report, uint length)
     {
-        double sum = 0;
+        double sumX = 0, sumY = 0;
         int fingers = 0;
         int slots = Math.Min(pad.Contacts, pad.LinkCollections - 1);
         for (ushort link = 1; link <= slots; link++)
         {
             if (HidP_GetUsageValue(HidP_Input, 0x01, link, 0x31, out uint y, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
-                || y < pad.YMin || y > pad.YMax)
+                || y < pad.YMin || y > pad.YMax
+                || HidP_GetUsageValue(HidP_Input, 0x01, link, 0x30, out uint x, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
+                || x < pad.XMin || x > pad.XMax)
                 continue;
             uint n = (uint)_usages.Length;
             if (HidP_GetUsages(HidP_Input, 0x0D, link, _usages, ref n, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
                 || !_usages.Take((int)n).Contains((ushort)0x42))
                 continue;
-            sum += y;
+            sumX += x;
+            sumY += y;
             fingers++;
         }
-        pad.Y = fingers > 0 ? sum / fingers : 0;
+        pad.X = fingers > 0 ? sumX / fingers : 0;
+        pad.Y = fingers > 0 ? sumY / fingers : 0;
         pad.YFingers = fingers;
     }
 
@@ -256,6 +264,7 @@ sealed class Watcher : NativeWindow
             int msg = (int)wParam;
             if ((info.Flags & LLMHF_INJECTED) == 0)
             {
+                if (_active == Action.None && DragHook(msg, info)) return 1;
                 if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN)
                 {
                     var pad = _activePad ?? MultiFingerPad();
@@ -353,7 +362,7 @@ sealed class Watcher : NativeWindow
             else Marshal.FreeHGlobal(p);
         }
         _pads[device] = pad;
-        Log.Write($"touchpad {DeviceName(device)}, {pad?.LinkCollections} link collections, y {pad?.YMin}..{pad?.YMax}");
+        Log.Write($"touchpad {DeviceName(device)}, {pad?.LinkCollections} link collections, x {pad?.XMin}..{pad?.XMax}, y {pad?.YMin}..{pad?.YMax}");
         return pad;
     }
 
@@ -367,6 +376,12 @@ sealed class Watcher : NativeWindow
         // HIDP_VALUE_CAPS is 72 bytes, LogicalMin/LogicalMax at 40/44.
         var valueCaps = new byte[72 * 16];
         ushort count = 16;
+        if (HidP_GetSpecificValueCaps(HidP_Input, 0x01, 0, 0x30, valueCaps, ref count, preparsed) == HIDP_STATUS_SUCCESS && count > 0)
+        {
+            pad.XMin = BitConverter.ToInt32(valueCaps, 40);
+            pad.XMax = BitConverter.ToInt32(valueCaps, 44);
+        }
+        count = 16;
         if (HidP_GetSpecificValueCaps(HidP_Input, 0x01, 0, 0x31, valueCaps, ref count, preparsed) == HIDP_STATUS_SUCCESS && count > 0)
         {
             pad.YMin = BitConverter.ToInt32(valueCaps, 40);
