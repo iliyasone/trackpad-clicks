@@ -1,6 +1,6 @@
 // Physical click with 3 fingers = middle button.
 // Physical click with 4+ fingers: release in place = media play/pause;
-// hold and slide up/down = volume, continuously, as far as the fingers travel.
+// hold and slide up/down = volume, set continuously as the fingers travel.
 // Taps are left to Windows settings (turned off there); this only remaps real clicks.
 //
 // Finger count, finger positions and button state come from the precision touchpad's
@@ -49,10 +49,12 @@ sealed class Watcher : NativeWindow
     // Our own SendInput calls carry this tag, though the hook already skips injected input.
     static readonly IntPtr Tag = new(0x7C11C);
     const long FreshMs = 250;
-    // One volume key (= 2% in Windows) per this share of the pad's height: full height = 50%.
-    const double VolumeStep = 1.0 / 25;
-    // Less travel than this on a four-finger click still counts as play/pause.
-    const double StillTravel = 0.03;
+    // Volume change per full height of the pad.
+    const double VolumeGain = 0.5;
+    // Less travel than this (share of the pad's height) on a four-finger click is play/pause.
+    const double StillTravel = 0.02;
+    // After the volume key that brings up the flyout, wait at most this long for it to land.
+    const long KeySettleMs = 150;
 
     readonly HookProc _hookProc;
     readonly IntPtr _hook;
@@ -65,11 +67,17 @@ sealed class Watcher : NativeWindow
     bool _swallowing;
     bool _loggedParseError;
 
-    // Four-finger hold: Y the next volume step is measured from, total travel so far.
+    // Four-finger hold. Travel is in shares of the pad's height, up is positive.
     double _anchorY;
     int _anchorFingers;
     double _travel;
-    int _volumeSteps;
+    // Volume mode starts once travel leaves the dead zone: one volume key shows the
+    // Windows flyout, then the level is set directly from the travel since then.
+    bool _sliding;
+    object? _endpoint;
+    float _keyFrom, _base;
+    long _keySent;
+    bool _keyLanded;
 
     public Watcher()
     {
@@ -176,7 +184,7 @@ sealed class Watcher : NativeWindow
     void Slide(Pad pad)
     {
         if (pad.YFingers == 0) return;
-        // A finger landing or lifting jumps the average; start measuring afresh.
+        // A finger landing or lifting jumps the average; measure afresh from here.
         if (pad.YFingers != _anchorFingers)
         {
             _anchorY = pad.Y;
@@ -184,18 +192,37 @@ sealed class Watcher : NativeWindow
             return;
         }
         double height = Math.Max(1, pad.YMax - pad.YMin);
-        // Y grows downward: fingers moving up give a positive delta.
-        double delta = (_anchorY - pad.Y) / height;
-        while (Math.Abs(delta) >= VolumeStep)
+        // Y grows downward: fingers moving up give positive travel.
+        _travel += (_anchorY - pad.Y) / height;
+        _anchorY = pad.Y;
+
+        if (!_sliding)
         {
-            int dir = Math.Sign(delta);
-            Key(dir > 0 ? VK_VOLUME_UP : VK_VOLUME_DOWN);
-            _volumeSteps += dir;
-            _travel += VolumeStep;
-            _anchorY -= dir * VolumeStep * height;
-            delta -= dir * VolumeStep;
+            if (Math.Abs(_travel) < StillTravel) return;
+            _endpoint = Audio.Endpoint();
+            if (_endpoint == null) return;
+            _sliding = true;
+            _keyFrom = Audio.Get(_endpoint);
+            _keyLanded = false;
+            _keySent = Environment.TickCount64;
+            Key(_travel > 0 ? VK_VOLUME_UP : VK_VOLUME_DOWN);
+            _travel = 0;
+            return;
         }
-        _travel = Math.Max(_travel, Math.Abs(delta));
+        if (_endpoint == null) return;
+        if (!_keyLanded)
+        {
+            // Setting the level before the key lands would let the key add its 2% on top.
+            float now = Audio.Get(_endpoint);
+            if (now == _keyFrom && Environment.TickCount64 - _keySent < KeySettleMs) return;
+            _keyLanded = true;
+            _base = now;
+        }
+        double level = _base + _travel * VolumeGain;
+        // Pin travel at the ends so reversing direction answers at once.
+        if (level > 1) { level = 1; _travel = (1 - _base) / VolumeGain; }
+        if (level < 0) { level = 0; _travel = -_base / VolumeGain; }
+        Audio.Set(_endpoint, (float)level);
     }
 
     // A pad with 3+ fingers on it right now, if any.
@@ -247,7 +274,7 @@ sealed class Watcher : NativeWindow
             _anchorY = pad.Y;
             _anchorFingers = pad.YFingers;
             _travel = 0;
-            _volumeSteps = 0;
+            _sliding = false;
         }
         else
         {
@@ -262,12 +289,13 @@ sealed class Watcher : NativeWindow
         if (_active == Action.Middle) Mouse(MOUSEEVENTF_MIDDLEUP);
         if (_active == Action.FourFinger)
         {
-            if (_travel < StillTravel)
+            if (!_sliding)
             {
                 Key(VK_MEDIA_PLAY_PAUSE);
                 Log.Write("play/pause");
             }
-            else Log.Write($"volume {_volumeSteps:+0;-0;0} steps");
+            else if (_endpoint != null) Log.Write($"volume {Audio.Get(_endpoint):P0}");
+            _endpoint = null;
         }
         _active = Action.None;
         _activePad = null;

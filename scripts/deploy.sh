@@ -16,7 +16,7 @@ $t = New-ScheduledTaskTrigger -AtLogOn -User 'iliya'
 $p = New-ScheduledTaskPrincipal -UserId 'iliya' -LogonType Interactive -RunLevel Limited
 $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName 'TrackpadClicks' -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null
-New-Item -ItemType File -Force C:\TrackpadClicks\debug | Out-Null; Remove-Item "$env:LOCALAPPDATA\TrackpadClicks\log.txt" -ErrorAction SilentlyContinue
+Remove-Item C:\TrackpadClicks\debug -ErrorAction SilentlyContinue; Remove-Item "$env:LOCALAPPDATA\TrackpadClicks\log.txt" -ErrorAction SilentlyContinue
 Start-ScheduledTask -TaskName 'TrackpadClicks'
 Start-Sleep 3
 Get-Process TrackpadClicks -ErrorAction SilentlyContinue | ForEach-Object { "running pid $($_.Id) session $($_.SessionId)" }
