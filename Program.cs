@@ -172,7 +172,14 @@ sealed partial class Watcher : NativeWindow
         pad.Button = button;
 
         if (_active == Action.FourFinger && _repeatKey == 0 && pad == _activePad) Slide(pad);
-        if (_drag != Drag.None && pad == _dragPad) DragFingers(pad);
+        if (_drag != Drag.None && pad == _dragPad)
+        {
+            DragFingers(pad);
+            // The hook can see the press before the pad's report does: only a release
+            // after a seen press ends the drag.
+            if (button) _dragPadPressed = true;
+            else if (_dragPadPressed) EndDrag("pad release");
+        }
     }
 
     // Each finger is its own link collection holding a tip switch and X/Y. The Magic

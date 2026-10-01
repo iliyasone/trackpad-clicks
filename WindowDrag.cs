@@ -32,12 +32,20 @@ sealed partial class Watcher
     POINT _dragFrom;
     RECT _windowFrom;
     int _dragMoves, _dragWheels;
+    long _dragStart;
+    bool _rightUpSeen, _swallowRightUp, _dragPadPressed;
 
     // Returns true when the event is consumed.
     bool DragHook(int msg, MSLLHOOKSTRUCT info)
     {
         if (_drag == Drag.None)
         {
+            // The drag ended on the pad's own release before Windows sent its button up.
+            if (msg == WM_RBUTTONUP && _swallowRightUp)
+            {
+                _swallowRightUp = false;
+                return true;
+            }
             var pad = msg == WM_RBUTTONDOWN && _active == Action.None ? TwoFingerPad() : null;
             if (pad == null) return false;
             var window = MovableWindowAt(info.X, info.Y);
@@ -52,6 +60,9 @@ sealed partial class Watcher
             _dragWindow = window;
             _dragFrom = new POINT { X = info.X, Y = info.Y };
             _dragMoves = _dragWheels = 0;
+            _dragStart = Environment.TickCount64;
+            _rightUpSeen = _swallowRightUp = false;
+            _dragPadPressed = pad.Button;
             return true;
         }
 
@@ -69,18 +80,29 @@ sealed partial class Watcher
             case WM_RBUTTONDOWN:
                 return true;
             case WM_RBUTTONUP:
-                if (_drag == Drag.Pending)
-                {
-                    Mouse(MOUSEEVENTF_RIGHTDOWN);
-                    Mouse(MOUSEEVENTF_RIGHTUP);
-                }
-                Log.Write($"two-finger {(_drag == Drag.Moving ? "drag" : "right click")}{(_dragByFingers ? " by fingers" : "")}, {_dragMoves} moves, {_dragWheels} wheels");
-                _drag = Drag.None;
-                _dragPad = null;
-                _dragWindow = IntPtr.Zero;
+                // Windows may let go of the right button while the pad is still pressed;
+                // the pad's own release ends the drag then.
+                _rightUpSeen = true;
+                if (_dragPadPressed && _dragPad is { Button: true }) return true;
+                EndDrag("button up");
                 return true;
         }
         return false;
+    }
+
+    void EndDrag(string by)
+    {
+        if (_drag == Drag.Pending)
+        {
+            Mouse(MOUSEEVENTF_RIGHTDOWN);
+            Mouse(MOUSEEVENTF_RIGHTUP);
+        }
+        Log.Write($"two-finger {(_drag == Drag.Moving ? "drag" : "right click")}{(_dragByFingers ? " by fingers" : "")}"
+                  + $" {Environment.TickCount64 - _dragStart} ms, ended by {by}, right up {(_rightUpSeen ? "early" : "pending")}, {_dragMoves} moves, {_dragWheels} wheels");
+        _swallowRightUp = !_rightUpSeen;
+        _drag = Drag.None;
+        _dragPad = null;
+        _dragWindow = IntPtr.Zero;
     }
 
     // Raw report from the dragging pad: used unless Windows is moving the cursor itself.
