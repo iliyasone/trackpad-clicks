@@ -1,19 +1,17 @@
-// Physical click with 3 fingers = middle button.
-// Physical click with 4+ fingers, by where the fingers are on the pad:
-//   top third    = volume up a step; held, it repeats like a held key;
-//   bottom third = the same, down;
-//   middle third = release in place for media play/pause, or hold and slide
-//                  up/down to set the volume continuously as the fingers travel.
-// Physical click with 2 fingers, held and moved = drag the window (WindowDrag.cs).
-// Taps are left to Windows settings (turned off there); this only remaps real clicks.
+// TrackpadClicks: Mac-like physical-click gestures for a Magic Trackpad on Windows
+// (what each click does: Gestures.cs). Taps are off in Windows settings.
 //
-// Finger count, finger positions and button state come from the precision touchpad's
-// raw HID reports. The left/right click Windows synthesizes for the same press is
-// swallowed by a low-level mouse hook. Both run on the one UI thread, so no locking.
+// Four threads, so that nothing can make the mouse lag:
+//   mouse hook  — decides swallow/pass from memory only (MouseHook.cs);
+//   raw input   — reads the touchpads' HID reports (RawInput.cs);
+//   effects     — SendInput, volume, window moves, the log (Effects.cs);
+//   UI          — the tray icon, and the watch over the other two.
+// On 2026-10-02 the old one-thread version got stuck inside a system call on every
+// gesture, and with the hook on that thread the whole mouse lagged. Now a stuck thread
+// only switches gestures off, shown in the tray.
 
 using System.Diagnostics;
-using System.Runtime.InteropServices;
-using static TrackpadClicks.Native;
+using System.Drawing.Drawing2D;
 
 namespace TrackpadClicks;
 
@@ -22,8 +20,8 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
-        // One instance. Not a mutex: a copy wedged in the kernel (see Watchdog) keeps its
-        // mutex but reports HasExited, and must not block its replacement.
+        // One instance. Not a mutex: a copy wedged in the kernel keeps its mutex but
+        // reports HasExited, and must not block its replacement.
         int replacing = args.Length == 2 && args[0] == "--replace" ? int.Parse(args[1]) : 0;
         int me = Environment.ProcessId;
         foreach (var other in Process.GetProcessesByName("TrackpadClicks"))
@@ -34,448 +32,145 @@ static class Program
             }
             catch { }
         }
+
         // Hook coordinates and window rects must both be physical pixels.
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        Log.Write("start");
-        var watcher = new Watcher();
-        Watchdog.Start();
-        Application.Run();
-        GC.KeepAlive(watcher);
+        Application.EnableVisualStyles();
+        Log.WriteNow("start");
+        Worker.Start();
+        var gestures = new Gestures();
+        RawInput.Start(gestures);
+        MouseHook.Start(gestures);
+        Application.Run(new Tray(gestures));
     }
 }
 
-enum Action { None, Middle, FourFinger }
-
-// One touchpad. The built-in ASUS pad streams reports too (here: constantly "pressed",
-// 0 fingers), so every touchpad keeps its own state.
-sealed class Pad
+sealed class Tray : ApplicationContext
 {
-    public IntPtr Preparsed;
-    public ushort LinkCollections;
-    public int XMin, XMax, YMin, YMax;
+    const int StuckMs = 2000;
 
-    public int Contacts;
-    public long LastReport;
-    public bool Button;
-    // Average position of the fingers touching, and how many fingers it covers.
-    public double X, Y;
-    public int YFingers;
-    // The same fingers one by one: contact ID and position.
-    public readonly uint[] Ids = new uint[8];
-    public readonly double[] Xs = new double[8], Ys = new double[8];
-}
+    readonly Gestures _gestures;
+    readonly NotifyIcon _icon;
+    readonly ToolStripMenuItem _enabled;
+    readonly Icon _on = Draw(Color.White), _off = Draw(Color.Gray), _stuckIcon = Draw(Color.OrangeRed);
+    string? _stuck;
 
-sealed partial class Watcher : NativeWindow
-{
-    // Our own SendInput calls carry this tag, though the hook already skips injected input.
-    static readonly IntPtr Tag = new(0x7C11C);
-    const long FreshMs = 250;
-    // Volume change per full height of the pad.
-    const double VolumeGain = 0.5;
-    // Less travel than this (share of the pad's height) on a four-finger click is play/pause.
-    const double StillTravel = 0.02;
-    // After the volume key that brings up the flyout, wait at most this long for it to land.
-    const long KeySettleMs = 150;
-    // Held top/bottom click: first repeat after this, then one step per RepeatMs.
-    const int RepeatDelayMs = 350, RepeatMs = 60;
-
-    readonly HookProc _hookProc;
-    readonly IntPtr _hook;
-    readonly Dictionary<IntPtr, Pad?> _pads = new();
-    readonly ushort[] _usages = new ushort[32];
-    readonly bool _debug = File.Exists(@"C:\TrackpadClicks\debug");
-
-    Action _active;
-    Pad? _activePad;
-    bool _swallowing;
-    bool _loggedParseError;
-
-    // Four-finger hold. Travel is in shares of the pad's height, up is positive.
-    double _anchorY;
-    int _anchorFingers;
-    double _travel;
-    // Volume mode starts once travel leaves the dead zone: one volume key shows the
-    // Windows flyout, then the level is set directly from the travel since then.
-    bool _sliding;
-    object? _endpoint;
-    float _keyFrom, _base;
-    long _keySent;
-    bool _keyLanded;
-
-    // Top/bottom four-finger click: the volume key it repeats while held.
-    readonly System.Windows.Forms.Timer _repeat = new();
-    ushort _repeatKey;
-
-    public Watcher()
+    public Tray(Gestures gestures)
     {
-        CreateHandle(new CreateParams());
-        var dev = new[] { new RAWINPUTDEVICE { UsagePage = 0x0D, Usage = 0x05, Flags = RIDEV_INPUTSINK, Target = Handle } };
-        if (!RegisterRawInputDevices(dev, 1, (uint)Marshal.SizeOf<RAWINPUTDEVICE>()))
-            Log.Write($"RegisterRawInputDevices failed {Marshal.GetLastWin32Error()}");
-        _hookProc = Hook;
-        _hook = SetWindowsHookEx(WH_MOUSE_LL, _hookProc, GetModuleHandle(null), 0);
-        if (_hook == IntPtr.Zero) Log.Write($"SetWindowsHookEx failed {Marshal.GetLastWin32Error()}");
-        _repeat.Tick += (_, _) =>
-        {
-            _repeat.Interval = RepeatMs;
-            Key(_repeatKey);
-        };
-    }
+        _gestures = gestures;
+        _enabled = new ToolStripMenuItem("Жесты включены") { Checked = true, CheckOnClick = true };
+        _enabled.CheckedChanged += (_, _) => SetEnabled(_enabled.Checked);
+        var menu = new ContextMenuStrip();
+        menu.Items.Add(_enabled);
+        menu.Items.Add("Открыть лог", null, (_, _) => Process.Start(new ProcessStartInfo(Log.Path) { UseShellExecute = true }));
+        menu.Items.Add("Перезапустить", null, (_, _) => Restart());
+        menu.Items.Add(new ToolStripSeparator());
+        menu.Items.Add("Выйти", null, (_, _) => Quit());
+        _icon = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
+        Show();
 
-    protected override void WndProc(ref Message m)
-    {
-        if (m.Msg == WM_INPUT) OnRawInput(m.LParam);
-        base.WndProc(ref m);
-    }
-
-    void OnRawInput(IntPtr handle)
-    {
-        uint headerSize = (uint)Marshal.SizeOf<RAWINPUTHEADER>();
-        uint size = 0;
-        GetRawInputData(handle, RID_INPUT, IntPtr.Zero, ref size, headerSize);
-        if (size == 0) return;
-        IntPtr buf = Marshal.AllocHGlobal((int)size);
-        try
-        {
-            if (GetRawInputData(handle, RID_INPUT, buf, ref size, headerSize) != size) return;
-            var header = Marshal.PtrToStructure<RAWINPUTHEADER>(buf);
-            if (header.Type != RIM_TYPEHID) return;
-            var pad = GetPad(header.Device);
-            if (pad == null) return;
-
-            uint reportSize = (uint)Marshal.ReadInt32(buf, (int)headerSize);
-            uint count = (uint)Marshal.ReadInt32(buf, (int)headerSize + 4);
-            IntPtr report = buf + (int)headerSize + 8;
-            for (uint i = 0; i < count; i++, report += (int)reportSize)
-                OnReport(header.Device, pad, report, reportSize);
-        }
-        finally { Marshal.FreeHGlobal(buf); }
-    }
-
-    void OnReport(IntPtr device, Pad pad, IntPtr report, uint length)
-    {
-        int status = HidP_GetUsageValue(HidP_Input, 0x0D, 0, 0x54, out uint contacts, pad.Preparsed, report, length);
-        if (status != HIDP_STATUS_SUCCESS)
-        {
-            if (!_loggedParseError) Log.Write($"contact count parse failed 0x{status:X}");
-            _loggedParseError = true;
-            return;
-        }
-        uint n = (uint)_usages.Length;
-        bool button = HidP_GetUsages(HidP_Input, 0x09, 0, _usages, ref n, pad.Preparsed, report, length) == HIDP_STATUS_SUCCESS
-                      && _usages.Take((int)n).Contains((ushort)1);
-
-        pad.Contacts = (int)contacts;
-        pad.LastReport = Environment.TickCount64;
-        if (pad.Contacts > 0) ReadFingers(pad, report, length);
-        else pad.YFingers = 0;
-
-        if (button != pad.Button && _debug)
-        {
-            var bytes = new byte[length];
-            Marshal.Copy(report, bytes, 0, (int)length);
-            Log.Write($"dev {device} {(button ? "down" : "up")} {contacts} fingers y {pad.Y:F0}/{pad.YFingers} {Convert.ToHexString(bytes)}");
-        }
-        if (button && !pad.Button)
-        {
-            if (pad.Contacts >= 3) Start(pad, pad.Contacts);
-        }
-        else if (!button && pad.Button && pad == _activePad)
-        {
-            End();
-        }
-        pad.Button = button;
-
-        if (_active == Action.FourFinger && _repeatKey == 0 && pad == _activePad) Slide(pad);
-        if (_drag != Drag.None && pad == _dragPad)
-        {
-            // The hook can see the press before the pad's report does: only a release
-            // after a seen press ends the drag.
-            if (button) _dragPadPressed = true;
-            if (!button && _dragPadPressed) EndDrag("pad release");
-            else DragFingers(pad);
-        }
-    }
-
-    // Each finger is its own link collection holding a tip switch and X/Y. The Magic
-    // Trackpad driver fills only the first `Contacts` of them; the rest hold leftover
-    // memory, sometimes with the tip switch set, so only those first slots are read.
-    void ReadFingers(Pad pad, IntPtr report, uint length)
-    {
-        double sumX = 0, sumY = 0;
-        int fingers = 0;
-        int slots = Math.Min(pad.Contacts, pad.LinkCollections - 1);
-        for (ushort link = 1; link <= slots; link++)
-        {
-            if (HidP_GetUsageValue(HidP_Input, 0x01, link, 0x31, out uint y, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
-                || y < pad.YMin || y > pad.YMax
-                || HidP_GetUsageValue(HidP_Input, 0x01, link, 0x30, out uint x, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
-                || x < pad.XMin || x > pad.XMax)
-                continue;
-            uint n = (uint)_usages.Length;
-            if (HidP_GetUsages(HidP_Input, 0x0D, link, _usages, ref n, pad.Preparsed, report, length) != HIDP_STATUS_SUCCESS
-                || !_usages.Take((int)n).Contains((ushort)0x42))
-                continue;
-            if (fingers < pad.Ids.Length)
-            {
-                HidP_GetUsageValue(HidP_Input, 0x0D, link, 0x51, out uint id, pad.Preparsed, report, length);
-                pad.Ids[fingers] = id;
-                pad.Xs[fingers] = x;
-                pad.Ys[fingers] = y;
-            }
-            sumX += x;
-            sumY += y;
-            fingers++;
-        }
-        pad.X = fingers > 0 ? sumX / fingers : 0;
-        pad.Y = fingers > 0 ? sumY / fingers : 0;
-        pad.YFingers = fingers;
-    }
-
-    void Slide(Pad pad)
-    {
-        if (pad.YFingers == 0) return;
-        // A finger landing or lifting jumps the average; measure afresh from here.
-        if (pad.YFingers != _anchorFingers)
-        {
-            _anchorY = pad.Y;
-            _anchorFingers = pad.YFingers;
-            return;
-        }
-        double height = Math.Max(1, pad.YMax - pad.YMin);
-        // Y grows downward: fingers moving up give positive travel.
-        _travel += (_anchorY - pad.Y) / height;
-        _anchorY = pad.Y;
-
-        if (!_sliding)
-        {
-            if (Math.Abs(_travel) < StillTravel) return;
-            _endpoint = Audio.Endpoint();
-            if (_endpoint == null) return;
-            _sliding = true;
-            _keyFrom = Audio.Get(_endpoint);
-            _keyLanded = false;
-            _keySent = Environment.TickCount64;
-            Key(_travel > 0 ? VK_VOLUME_UP : VK_VOLUME_DOWN);
-            _travel = 0;
-            return;
-        }
-        if (_endpoint == null) return;
-        if (!_keyLanded)
-        {
-            // Setting the level before the key lands would let the key add its 2% on top.
-            float now = Audio.Get(_endpoint);
-            if (now == _keyFrom && Environment.TickCount64 - _keySent < KeySettleMs) return;
-            _keyLanded = true;
-            _base = now;
-        }
-        double level = _base + _travel * VolumeGain;
-        // Pin travel at the ends so reversing direction answers at once.
-        if (level > 1) { level = 1; _travel = (1 - _base) / VolumeGain; }
-        if (level < 0) { level = 0; _travel = -_base / VolumeGain; }
-        Audio.Set(_endpoint, (float)level);
-    }
-
-    // A pad with 3+ fingers on it right now, if any.
-    Pad? MultiFingerPad()
-    {
-        long now = Environment.TickCount64;
-        foreach (var pad in _pads.Values)
-            if (pad != null && pad.Contacts >= 3 && now - pad.LastReport < FreshMs) return pad;
-        return null;
-    }
-
-    IntPtr Hook(int code, IntPtr wParam, IntPtr lParam)
-    {
-        if (code >= 0)
-        {
-            var info = Marshal.PtrToStructure<MSLLHOOKSTRUCT>(lParam);
-            int msg = (int)wParam;
-            if ((info.Flags & LLMHF_INJECTED) == 0)
-            {
-                if (_active == Action.None && DragHook(msg, info)) return 1;
-                if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN)
-                {
-                    var pad = _activePad ?? MultiFingerPad();
-                    if (pad != null)
-                    {
-                        Start(pad, pad.Contacts);
-                        _swallowing = true;
-                        return 1;
-                    }
-                }
-                else if (msg is WM_LBUTTONUP or WM_RBUTTONUP && _swallowing)
-                {
-                    _swallowing = false;
-                    End();
-                    return 1;
-                }
-            }
-        }
-        return CallNextHookEx(_hook, code, wParam, lParam);
-    }
-
-    void Start(Pad pad, int fingers)
-    {
-        if (_active != Action.None) return;
-        _activePad = pad;
-        if (fingers >= 4)
-        {
-            // Play/pause waits for the release: a slide in between means volume instead.
-            _active = Action.FourFinger;
-            _anchorY = pad.Y;
-            _anchorFingers = pad.YFingers;
-            _travel = 0;
-            _sliding = false;
-            // Y grows downward; with no finger positions fall back to the middle zone.
-            double at = pad.YFingers > 0 ? (pad.Y - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin) : 0.5;
-            _repeatKey = at < 1.0 / 3 ? VK_VOLUME_UP : at > 2.0 / 3 ? VK_VOLUME_DOWN : (ushort)0;
-            if (_repeatKey != 0)
-            {
-                Key(_repeatKey);
-                _repeat.Interval = RepeatDelayMs;
-                _repeat.Start();
-            }
-        }
-        else
-        {
-            _active = Action.Middle;
-            Mouse(MOUSEEVENTF_MIDDLEDOWN);
-        }
-        Log.Write($"{_active} ({fingers} fingers){(_repeatKey == VK_VOLUME_UP ? " top" : _repeatKey == VK_VOLUME_DOWN ? " bottom" : "")}");
-    }
-
-    void End()
-    {
-        if (_active == Action.Middle) Mouse(MOUSEEVENTF_MIDDLEUP);
-        if (_active == Action.FourFinger)
-        {
-            _repeat.Stop();
-            if (_repeatKey != 0) _repeatKey = 0;
-            else if (!_sliding)
-            {
-                Key(VK_MEDIA_PLAY_PAUSE);
-                Log.Write("play/pause");
-            }
-            else if (_endpoint != null) Log.Write($"volume {Audio.Get(_endpoint):P0}");
-            _endpoint = null;
-        }
-        _active = Action.None;
-        _activePad = null;
-    }
-
-    static void Mouse(uint flags) => Send(new INPUT
-    {
-        Type = INPUT_MOUSE,
-        U = new InputUnion { Mouse = new MOUSEINPUT { Flags = flags, ExtraInfo = Tag } },
-    });
-
-    static void Key(ushort vk)
-    {
-        Send(new INPUT { Type = INPUT_KEYBOARD, U = new InputUnion { Keyboard = new KEYBDINPUT { Vk = vk, Flags = KEYEVENTF_EXTENDEDKEY, ExtraInfo = Tag } } });
-        Send(new INPUT { Type = INPUT_KEYBOARD, U = new InputUnion { Keyboard = new KEYBDINPUT { Vk = vk, Flags = KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, ExtraInfo = Tag } } });
-    }
-
-    static void Send(INPUT input) => SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
-
-    Pad? GetPad(IntPtr device)
-    {
-        if (_pads.TryGetValue(device, out var pad)) return pad;
-        pad = null;
-        uint size = 0;
-        GetRawInputDeviceInfo(device, RIDI_PREPARSEDDATA, IntPtr.Zero, ref size);
-        if (size > 0)
-        {
-            IntPtr p = Marshal.AllocHGlobal((int)size);
-            if ((int)GetRawInputDeviceInfo(device, RIDI_PREPARSEDDATA, p, ref size) > 0) pad = Describe(p);
-            else Marshal.FreeHGlobal(p);
-        }
-        _pads[device] = pad;
-        Log.Write($"touchpad {DeviceName(device)}, {pad?.LinkCollections} link collections, x {pad?.XMin}..{pad?.XMax}, y {pad?.YMin}..{pad?.YMax}");
-        return pad;
-    }
-
-    static Pad Describe(IntPtr preparsed)
-    {
-        var pad = new Pad { Preparsed = preparsed };
-        // HIDP_CAPS: NumberLinkCollectionNodes sits after 5 lengths and 17 reserved USHORTs.
-        var caps = new byte[64];
-        if (HidP_GetCaps(preparsed, caps) == HIDP_STATUS_SUCCESS)
-            pad.LinkCollections = BitConverter.ToUInt16(caps, 44);
-        // HIDP_VALUE_CAPS is 72 bytes, LogicalMin/LogicalMax at 40/44.
-        var valueCaps = new byte[72 * 16];
-        ushort count = 16;
-        if (HidP_GetSpecificValueCaps(HidP_Input, 0x01, 0, 0x30, valueCaps, ref count, preparsed) == HIDP_STATUS_SUCCESS && count > 0)
-        {
-            pad.XMin = BitConverter.ToInt32(valueCaps, 40);
-            pad.XMax = BitConverter.ToInt32(valueCaps, 44);
-        }
-        count = 16;
-        if (HidP_GetSpecificValueCaps(HidP_Input, 0x01, 0, 0x31, valueCaps, ref count, preparsed) == HIDP_STATUS_SUCCESS && count > 0)
-        {
-            pad.YMin = BitConverter.ToInt32(valueCaps, 40);
-            pad.YMax = BitConverter.ToInt32(valueCaps, 44);
-        }
-        return pad;
-    }
-
-    static string DeviceName(IntPtr device)
-    {
-        uint chars = 0;
-        GetRawInputDeviceInfo(device, RIDI_DEVICENAME, IntPtr.Zero, ref chars);
-        IntPtr buf = Marshal.AllocHGlobal((int)chars * 2);
-        try
-        {
-            GetRawInputDeviceInfo(device, RIDI_DEVICENAME, buf, ref chars);
-            return Marshal.PtrToStringUni(buf) ?? "?";
-        }
-        finally { Marshal.FreeHGlobal(buf); }
-    }
-}
-
-// On 2026-10-02 the UI thread got stuck inside a system call while Bluetooth HID devices
-// kept reconnecting: no more raw input, Windows silently dropped the mouse hook, and the
-// process could not even be killed. If the UI thread stops answering, start a fresh
-// copy and leave.
-static class Watchdog
-{
-    const int StuckMs = 5000;
-    static long _beat = Environment.TickCount64;
-
-    public static void Start()
-    {
-        var timer = new System.Windows.Forms.Timer { Interval = 1000 };
-        timer.Tick += (_, _) => Interlocked.Exchange(ref _beat, Environment.TickCount64);
+        var timer = new System.Windows.Forms.Timer { Interval = 500 };
+        timer.Tick += (_, _) => Watch();
         timer.Start();
-        new Thread(Watch) { IsBackground = true, Name = "watchdog" }.Start();
     }
 
-    static void Watch()
+    void SetEnabled(bool on)
     {
-        while (true)
+        Gestures.Enabled = on;
+        if (!on) lock (_gestures.Sync) _gestures.Reset();
+        Log.Write(on ? "gestures on" : "gestures off");
+        Show();
+    }
+
+    // A thread busy on one item for too long is stuck: gestures off, say so.
+    void Watch()
+    {
+        if (_stuck != null) return;
+        _stuck = Stuck(ref Worker.BusySince, Worker.At, "действия")
+                 ?? Stuck(ref RawInput.BusySince, RawInput.At, "чтение трекпада");
+        if (_stuck == null) return;
+        Gestures.Enabled = false;
+        Log.WriteNow($"stuck: {_stuck}; gestures off");
+        Show();
+        _icon.ShowBalloonTip(10000, "TrackpadClicks завис",
+            $"{_stuck}. Жесты выключены, мышь работает как обычно. Перезапустить можно в меню значка.", ToolTipIcon.Warning);
+    }
+
+    static string? Stuck(ref long since, string at, string thread)
+    {
+        long start = Interlocked.Read(ref since);
+        if (start == 0) return null;
+        long ms = Environment.TickCount64 - start;
+        return ms > StuckMs ? $"Поток «{thread}» завис на «{at}» ({ms / 1000} с)" : null;
+    }
+
+    void Show()
+    {
+        _icon.Icon = _stuck != null ? _stuckIcon : Gestures.Enabled ? _on : _off;
+        _icon.Text = _stuck != null ? "TrackpadClicks: завис, жесты выключены"
+            : Gestures.Enabled ? "TrackpadClicks: жесты включены" : "TrackpadClicks: жесты выключены";
+    }
+
+    void Restart()
+    {
+        Log.WriteNow("restart from tray");
+        Process.Start(Environment.ProcessPath!, $"--replace {Environment.ProcessId}");
+        Quit();
+    }
+
+    void Quit()
+    {
+        _icon.Visible = false;
+        Environment.Exit(0);
+    }
+
+    // A small trackpad: rounded rectangle, filled with the state's color.
+    static Icon Draw(Color fill)
+    {
+        using var bitmap = new Bitmap(32, 32);
+        using (var g = Graphics.FromImage(bitmap))
         {
-            Thread.Sleep(1000);
-            long silent = Environment.TickCount64 - Interlocked.Read(ref _beat);
-            if (silent < StuckMs) continue;
-            Log.Write($"UI thread stuck for {silent} ms, starting a fresh copy");
-            Process.Start(Environment.ProcessPath!, $"--replace {Environment.ProcessId}");
-            Environment.FailFast("UI thread stuck");
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using var path = new GraphicsPath();
+            var r = new Rectangle(2, 6, 28, 20);
+            const int d = 10;
+            path.AddArc(r.Left, r.Top, d, d, 180, 90);
+            path.AddArc(r.Right - d, r.Top, d, d, 270, 90);
+            path.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            path.AddArc(r.Left, r.Bottom - d, d, d, 90, 90);
+            path.CloseFigure();
+            using var brush = new SolidBrush(fill);
+            g.FillPath(brush, path);
+            using var pen = new Pen(Color.FromArgb(50, 50, 50), 2.5f);
+            g.DrawPath(pen, path);
         }
+        return Icon.FromHandle(bitmap.GetHicon());
     }
 }
 
 static class Log
 {
-    static readonly string Path = System.IO.Path.Combine(
+    public static readonly string Path = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TrackpadClicks", "log.txt");
+    static readonly object FileLock = new();
 
+    // From any thread, the hook included: the write itself happens on the effects worker.
     public static void Write(string line)
+    {
+        var at = DateTime.Now;
+        Worker.Post("log write", () => WriteNow(line, at));
+    }
+
+    public static void WriteNow(string line, DateTime? at = null)
     {
         try
         {
-            Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
-            if (File.Exists(Path) && new FileInfo(Path).Length > 1_000_000) File.Delete(Path);
-            File.AppendAllText(Path, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {line}\n");
+            lock (FileLock)
+            {
+                Directory.CreateDirectory(System.IO.Path.GetDirectoryName(Path)!);
+                if (File.Exists(Path) && new FileInfo(Path).Length > 1_000_000) File.Delete(Path);
+                File.AppendAllText(Path, $"{at ?? DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {line}\n");
+            }
         }
         catch { }
     }
