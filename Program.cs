@@ -6,9 +6,9 @@
 //   raw input   — reads the touchpads' HID reports (RawInput.cs);
 //   effects     — SendInput, volume, window moves, the log (Effects.cs);
 //   UI          — the tray icon, and the watch over the other two.
-// On 2026-10-02 the old one-thread version got stuck inside a system call on every
-// gesture, and with the hook on that thread the whole mouse lagged. Now a stuck thread
-// only switches gestures off, shown in the tray.
+// Every mouse event in the system waits for the hook, so a call that hangs must never
+// run on it. A stuck raw input or effects thread only switches gestures off, shown in
+// the tray.
 
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
