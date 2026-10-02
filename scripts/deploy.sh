@@ -10,6 +10,9 @@ $ProgressPreference = 'SilentlyContinue'
 Get-Process TrackpadClicks -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep 1
 New-Item -ItemType Directory -Force C:\TrackpadClicks | Out-Null
+# A copy wedged in the kernel keeps its exe locked; a locked exe can still be renamed.
+Get-ChildItem C:\TrackpadClicks\TrackpadClicks.old-*.exe -ErrorAction SilentlyContinue | Remove-Item -ErrorAction SilentlyContinue
+if (Test-Path C:\TrackpadClicks\TrackpadClicks.exe) { Rename-Item C:\TrackpadClicks\TrackpadClicks.exe "TrackpadClicks.old-$(Get-Date -Format yyyyMMddHHmmss).exe" }
 Move-Item "$env:USERPROFILE\TrackpadClicks.exe" C:\TrackpadClicks\TrackpadClicks.exe -Force
 $a = New-ScheduledTaskAction -Execute 'C:\TrackpadClicks\TrackpadClicks.exe'
 $t = New-ScheduledTaskTrigger -AtLogOn -User 'iliya'
@@ -17,9 +20,10 @@ $p = New-ScheduledTaskPrincipal -UserId 'iliya' -LogonType Interactive -RunLevel
 $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName 'TrackpadClicks' -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null
 Remove-Item C:\TrackpadClicks\debug -ErrorAction SilentlyContinue; Remove-Item "$env:LOCALAPPDATA\TrackpadClicks\log.txt" -ErrorAction SilentlyContinue
+Stop-ScheduledTask -TaskName 'TrackpadClicks'
 Start-ScheduledTask -TaskName 'TrackpadClicks'
 Start-Sleep 3
-Get-Process TrackpadClicks -ErrorAction SilentlyContinue | ForEach-Object { "running pid $($_.Id) session $($_.SessionId)" }
+Get-Process TrackpadClicks -ErrorAction SilentlyContinue | Where-Object { -not $_.HasExited } | ForEach-Object { "running pid $($_.Id) session $($_.SessionId)" }
 Get-Content "$env:LOCALAPPDATA\TrackpadClicks\log.txt" -Tail 10 -ErrorAction SilentlyContinue
 PS
 B64=$(iconv -f UTF-8 -t UTF-16LE /tmp/trackpad-install.ps1 | base64 -w0)

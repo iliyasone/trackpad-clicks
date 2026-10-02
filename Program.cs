@@ -11,6 +11,7 @@
 // raw HID reports. The left/right click Windows synthesizes for the same press is
 // swallowed by a low-level mouse hook. Both run on the one UI thread, so no locking.
 
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using static TrackpadClicks.Native;
 
@@ -19,14 +20,25 @@ namespace TrackpadClicks;
 static class Program
 {
     [STAThread]
-    static void Main()
+    static void Main(string[] args)
     {
-        using var mutex = new Mutex(true, @"Local\TrackpadClicks", out bool first);
-        if (!first) return;
+        // One instance. Not a mutex: a copy wedged in the kernel (see Watchdog) keeps its
+        // mutex but reports HasExited, and must not block its replacement.
+        int replacing = args.Length == 2 && args[0] == "--replace" ? int.Parse(args[1]) : 0;
+        int me = Environment.ProcessId;
+        foreach (var other in Process.GetProcessesByName("TrackpadClicks"))
+        {
+            try
+            {
+                if (other.Id != me && other.Id != replacing && !other.HasExited) return;
+            }
+            catch { }
+        }
         // Hook coordinates and window rects must both be physical pixels.
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Log.Write("start");
         var watcher = new Watcher();
+        Watchdog.Start();
         Application.Run();
         GC.KeepAlive(watcher);
     }
@@ -418,6 +430,37 @@ sealed partial class Watcher : NativeWindow
             return Marshal.PtrToStringUni(buf) ?? "?";
         }
         finally { Marshal.FreeHGlobal(buf); }
+    }
+}
+
+// On 2026-10-02 the UI thread got stuck inside a system call while Bluetooth HID devices
+// kept reconnecting: no more raw input, Windows silently dropped the mouse hook, and the
+// process could not even be killed. If the UI thread stops answering, start a fresh
+// copy and leave.
+static class Watchdog
+{
+    const int StuckMs = 5000;
+    static long _beat = Environment.TickCount64;
+
+    public static void Start()
+    {
+        var timer = new System.Windows.Forms.Timer { Interval = 1000 };
+        timer.Tick += (_, _) => Interlocked.Exchange(ref _beat, Environment.TickCount64);
+        timer.Start();
+        new Thread(Watch) { IsBackground = true, Name = "watchdog" }.Start();
+    }
+
+    static void Watch()
+    {
+        while (true)
+        {
+            Thread.Sleep(1000);
+            long silent = Environment.TickCount64 - Interlocked.Read(ref _beat);
+            if (silent < StuckMs) continue;
+            Log.Write($"UI thread stuck for {silent} ms, starting a fresh copy");
+            Process.Start(Environment.ProcessPath!, $"--replace {Environment.ProcessId}");
+            Environment.FailFast("UI thread stuck");
+        }
     }
 }
 
