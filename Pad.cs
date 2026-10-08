@@ -36,35 +36,34 @@ sealed class Pad
         Array.Copy(frame.Xs, Xs, MaxFingers);
         Array.Copy(frame.Ys, Ys, MaxFingers);
 
+        // Some reports carry the contact count without readable fingers: forget only
+        // fingers missing from a report that has them all.
         var ids = frame.Ids.AsSpan(0, frame.Fingers);
-        _lifted.Clear();
-        foreach (var id in Landed.Keys)
-            if (!ids.Contains(id)) _lifted.Add(id);
-        foreach (var id in _lifted) Landed.Remove(id);
+        if (frame.Fingers >= frame.Contacts)
+        {
+            _lifted.Clear();
+            foreach (var id in Landed.Keys)
+                if (!ids.Contains(id)) _lifted.Add(id);
+            foreach (var id in _lifted) Landed.Remove(id);
+        }
         foreach (var id in ids) Landed.TryAdd(id, now);
     }
 
-    // Fingers that landed together with the last one to land, within windowMs of it.
-    // Fingers resting on the pad before that are not counted. Without finger
-    // positions in the reports, every contact counts.
-    public int Together(long windowMs)
+    // How long before the last finger to land each finger landed, longest first.
+    // A contact the reports have not shown yet has just landed.
+    long[] Landings()
     {
-        if (YFingers == 0) return Contacts;
-        long last = 0;
-        for (int i = 0; i < YFingers; i++) last = Math.Max(last, Landed.GetValueOrDefault(Ids[i]));
-        int together = 0;
-        for (int i = 0; i < YFingers; i++)
-            if (last - Landed.GetValueOrDefault(Ids[i]) <= windowMs) together++;
-        return together;
+        var at = Landed.Values.OrderDescending().Take(Contacts).ToList();
+        while (at.Count < Contacts) at.Insert(0, LastReport);
+        long last = at.Count > 0 ? at.Max() : 0;
+        return at.Select(t => last - t).OrderDescending().ToArray();
     }
 
-    // How long before the last finger each finger landed, for the log.
-    public string Landings()
-    {
-        long last = 0;
-        for (int i = 0; i < YFingers; i++) last = Math.Max(last, Landed.GetValueOrDefault(Ids[i]));
-        return string.Join("/", Enumerable.Range(0, YFingers).Select(i => last - Landed.GetValueOrDefault(Ids[i])).OrderDescending());
-    }
+    // Fingers that landed together with the last one, within windowMs of it; fingers
+    // resting on the pad before that are not counted.
+    public int Together(long windowMs) => Landings().Count(ms => ms <= windowMs);
+
+    public string LandingsText => string.Join("/", Landings());
 }
 
 // One parsed report, built outside the lock.

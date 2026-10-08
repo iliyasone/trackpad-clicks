@@ -108,7 +108,7 @@ sealed class Gestures
             int together = pad.Together(TogetherMs);
             if (together >= 3) Start(pad, together);
             else if (_mode == Mode.None)
-                Log.Write($"{pad.Contacts} fingers not together (landed {pad.Landings()} ms before the last), left to Windows");
+                Log.Write($"{pad.Contacts} fingers not together (landed {pad.LandingsText} ms before the last), left to Windows");
         }
         else if (!button && pad.Button && pad == _modePad)
         {
@@ -183,7 +183,7 @@ sealed class Gestures
             _mode = Mode.Middle;
             Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
         }
-        Log.Write($"{_mode} ({fingers} fingers, landed {pad.Landings()} ms before the last){where}");
+        Log.Write($"{_mode} ({fingers} fingers, landed {pad.LandingsText} ms before the last){where}");
     }
 
     void End()
