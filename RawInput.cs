@@ -75,7 +75,7 @@ sealed class RawInput : NativeWindow
                 At = "parse report";
                 if (!Parse(pad, report, reportSize, out var frame)) continue;
                 if (_debug && frame.Button != pad.Button)
-                    Log.Write($"dev {header.Device} {(frame.Button ? "down" : "up")} {frame.Contacts} fingers");
+                    Log.Write($"dev {header.Device} {(frame.Button ? "down" : "up")} {frame.Contacts} fingers, landed {pad.Landings()} ms before the last");
                 At = "gestures";
                 lock (_gestures.Sync)
                 {

@@ -14,6 +14,10 @@ TrackpadClicks binds them to real *clicks*, so a light touch never triggers anyt
 | 2 fingers, hold, one finger stays, one slides | Normal selection drag, as without TrackpadClicks |
 | 2 fingers, release in place | Normal click (right or left, as Windows decided) |
 
+Three- and four-finger clicks count only fingers put down together, within 150 ms of
+each other. With two fingers resting on the pad, a click by a third finger is not a
+three-finger click and goes to Windows as usual.
+
 One- and two-finger clicks otherwise work as usual.
 
 ## Requirements

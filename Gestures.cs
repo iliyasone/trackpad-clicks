@@ -2,6 +2,9 @@
 // thread (finger reports) and the mouse hook (button events), and only changes state
 // in memory; anything that touches the system goes through Effects.
 //
+// Only fingers that landed together count: with two fingers resting on the pad, a
+// click by a third is not a three-finger click and goes to Windows as usual.
+//
 // Click with 3 fingers = middle button.
 // Click with 4+ fingers, by where the fingers are on the pad:
 //   top third    = volume up a step; held, it repeats like a held key;
@@ -29,6 +32,8 @@ sealed class Gestures
     public readonly List<Pad> Pads = new();
 
     const long FreshMs = 250;
+    // Fingers landing within this of each other count as put down together.
+    const long TogetherMs = 150;
     // Less travel than this (share of the pad's height) on a four-finger click is play/pause.
     const double StillTravel = 0.02;
     // Held top/bottom click: first repeat after this, then one step per RepeatMs.
@@ -98,9 +103,12 @@ sealed class Gestures
             pad.Button = button;
             return;
         }
-        if (button && !pad.Button)
+        if (button && !pad.Button && pad.Contacts >= 3)
         {
-            if (pad.Contacts >= 3) Start(pad, pad.Contacts);
+            int together = pad.Together(TogetherMs);
+            if (together >= 3) Start(pad, together);
+            else if (_mode == Mode.None)
+                Log.Write($"{pad.Contacts} fingers not together (landed {pad.Landings()} ms before the last), left to Windows");
         }
         else if (!button && pad.Button && pad == _modePad)
         {
@@ -128,10 +136,10 @@ sealed class Gestures
         if (_mode == Mode.None && DragMouse(msg, info)) return true;
         if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN)
         {
-            var pad = _modePad ?? FreshPad(p => p.Contacts >= 3);
+            var pad = _modePad ?? FreshPad(p => p.Together(TogetherMs) >= 3);
             if (pad != null)
             {
-                Start(pad, pad.Contacts);
+                Start(pad, pad.Together(TogetherMs));
                 _swallowing = true;
                 return true;
             }
@@ -175,7 +183,7 @@ sealed class Gestures
             _mode = Mode.Middle;
             Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
         }
-        Log.Write($"{_mode} ({fingers} fingers){where}");
+        Log.Write($"{_mode} ({fingers} fingers, landed {pad.Landings()} ms before the last){where}");
     }
 
     void End()
