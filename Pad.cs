@@ -51,17 +51,13 @@ sealed class Pad
 
     // How long before the last finger to land each finger landed, longest first.
     // A contact the reports have not shown yet has just landed.
-    long[] Landings()
+    public long[] Landings()
     {
         var at = Landed.Values.OrderDescending().Take(Contacts).ToList();
         while (at.Count < Contacts) at.Insert(0, LastReport);
         long last = at.Count > 0 ? at.Max() : 0;
         return at.Select(t => last - t).OrderDescending().ToArray();
     }
-
-    // Fingers that landed together with the last one, within windowMs of it; fingers
-    // resting on the pad before that are not counted.
-    public int Together(long windowMs) => Landings().Count(ms => ms <= windowMs);
 
     public string LandingsText => string.Join("/", Landings());
 }

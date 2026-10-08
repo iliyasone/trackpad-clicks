@@ -2,8 +2,8 @@
 // thread (finger reports) and the mouse hook (button events), and only changes state
 // in memory; anything that touches the system goes through Effects.
 //
-// Only fingers that landed together count: with two fingers resting on the pad, a
-// click by a third is not a three-finger click and goes to Windows as usual.
+// Fingers resting on the pad before the click are told apart by when each landed;
+// see ClickFingers. With two fingers resting, a click by a third goes to Windows.
 //
 // Click with 3 fingers = middle button.
 // Click with 4+ fingers, by where the fingers are on the pad:
@@ -32,8 +32,12 @@ sealed class Gestures
     public readonly List<Pad> Pads = new();
 
     const long FreshMs = 250;
-    // Fingers landing within this of each other count as put down together.
+    // Fingers landing within this of each other were put down together (observed:
+    // 0-60 ms for one motion, hundreds of ms for a finger added later).
     const long TogetherMs = 150;
+    // A lone finger landing within this of the ones before still belongs to the same
+    // motion; later, they were resting and it is a click by that finger alone.
+    const long SameMotionMs = 400;
     // Less travel than this (share of the pad's height) on a four-finger click is play/pause.
     const double StillTravel = 0.02;
     // Held top/bottom click: first repeat after this, then one step per RepeatMs.
@@ -105,10 +109,10 @@ sealed class Gestures
         }
         if (button && !pad.Button && pad.Contacts >= 3)
         {
-            int together = pad.Together(TogetherMs);
-            if (together >= 3) Start(pad, together);
+            int fingers = ClickFingers(pad);
+            if (fingers >= 3) Start(pad, fingers);
             else if (_mode == Mode.None)
-                Log.Write($"{pad.Contacts} fingers not together (landed {pad.LandingsText} ms before the last), left to Windows");
+                Log.Write($"{pad.Contacts} fingers, the last one added alone (landed {pad.LandingsText} ms before the last), left to Windows");
         }
         else if (!button && pad.Button && pad == _modePad)
         {
@@ -136,10 +140,10 @@ sealed class Gestures
         if (_mode == Mode.None && DragMouse(msg, info)) return true;
         if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN)
         {
-            var pad = _modePad ?? FreshPad(p => p.Together(TogetherMs) >= 3);
+            var pad = _modePad ?? FreshPad(p => ClickFingers(p) >= 3);
             if (pad != null)
             {
-                Start(pad, pad.Together(TogetherMs));
+                Start(pad, ClickFingers(pad));
                 _swallowing = true;
                 return true;
             }
@@ -154,6 +158,21 @@ sealed class Gestures
     }
 
     // ---- Three and four fingers.
+
+    // How many fingers a click is made with, by how they landed. The last fingers to
+    // land within TogetherMs of each other are the fresh group:
+    //   3+ fresh             -> that many; a finger resting before (a thumb) is left out;
+    //   2 fresh              -> every finger: one finger pointing, two added to click;
+    //   1 fresh, soon after  -> every finger: a slow but single motion;
+    //   1 fresh, later       -> 1: the others rest, the click is that finger's.
+    static int ClickFingers(Pad pad)
+    {
+        var before = pad.Landings(); // longest first, the last finger at 0
+        int fresh = before.Count(ms => ms <= TogetherMs);
+        if (fresh >= 3) return fresh;
+        if (fresh == 2) return before.Length;
+        return before.Length >= 2 && before[^2] <= SameMotionMs ? before.Length : 1;
+    }
 
     void Start(Pad pad, int fingers)
     {
