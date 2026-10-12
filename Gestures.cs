@@ -2,15 +2,15 @@
 // thread (finger reports) and the mouse hook (button events), and only changes state
 // in memory; anything that touches the system goes through Effects.
 //
-// Fingers resting on the pad before the click are told apart by when each landed;
-// see ClickFingers. With two fingers resting, a click by a third goes to Windows.
+// Fingers resting on the pad before the click are told apart by when each landed and
+// whether it moved since; see ClickFingers. With two fingers resting, a click by a
+// third goes to Windows.
 //
-// Click with 3 fingers = middle button.
-// Click with 4+ fingers, by where the fingers are on the pad:
+// Click with 3 fingers = middle button. Four or more fingers: nothing, left to Windows.
+// Click with 1 finger at the right edge of the pad, by height:
 //   top third    = volume up a step; held, it repeats like a held key;
-//   bottom third = the same, down;
-//   middle third = release in place for media play/pause, or hold and slide
-//                  up/down to set the volume continuously as the fingers travel.
+//   middle third = media play/pause;
+//   bottom third = volume down, like the top.
 // Click with 2 fingers: Windows makes it a left press (one finger holds the click, the
 // other drags a selection) or a right click, and which one the user means is not known
 // at press time. So the press is held back and the fingers decide:
@@ -38,8 +38,11 @@ sealed class Gestures
     // A lone finger landing within this of the ones before still belongs to the same
     // motion; later, they were resting and it is a click by that finger alone.
     const long SameMotionMs = 400;
-    // Less travel than this (share of the pad's height) on a four-finger click is play/pause.
-    const double StillTravel = 0.02;
+    // An older finger that moved within this before the last landing was pointing,
+    // not resting, and is counted in the click.
+    const long PointingMs = 1500;
+    // The right edge strip with the media clicks, as a share of the pad's width (~19 mm).
+    const double EdgeWidth = 0.12;
     // Held top/bottom click: first repeat after this, then one step per RepeatMs.
     const int RepeatDelayMs = 350, RepeatMs = 60;
     // Finger travel, as a share of the pad's width, that counts as moving (~4 mm).
@@ -49,16 +52,12 @@ sealed class Gestures
     // Shell windows that keep their own clicks.
     static readonly HashSet<string> Unmovable = new() { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
 
-    enum Mode { None, Middle, FourFinger }
+    enum Mode { None, Middle, Edge }
     Mode _mode;
     Pad? _modePad;
     bool _swallowing;
 
-    // Four-finger hold. Travel is in shares of the pad's height, up is positive.
-    double _anchorY;
-    int _anchorFingers;
-    double _travel;
-    bool _sliding;
+    // Edge click: the volume key held, or 0 for play/pause.
     ushort _repeatKey;
     readonly System.Threading.Timer _repeat;
 
@@ -107,20 +106,22 @@ sealed class Gestures
             pad.Button = button;
             return;
         }
-        if (button && !pad.Button && pad.Contacts >= 3)
+        if (button && !pad.Button && EdgeKey(pad) is ushort key)
+        {
+            StartEdge(pad, key);
+        }
+        else if (button && !pad.Button && pad.Contacts >= 3)
         {
             int fingers = ClickFingers(pad);
-            if (fingers >= 3) Start(pad, fingers);
+            if (fingers == 3) StartMiddle(pad);
             else if (_mode == Mode.None)
-                Log.Write($"{pad.Contacts} fingers, the last one added alone (landed {pad.LandingsText} ms before the last), left to Windows");
+                Log.Write($"{pad.Contacts} fingers, counted {fingers} (landed {pad.LandingsText} ms before the last), left to Windows");
         }
         else if (!button && pad.Button && pad == _modePad)
         {
             End();
         }
         pad.Button = button;
-
-        if (_mode == Mode.FourFinger && _repeatKey == 0 && pad == _modePad) Slide(pad);
 
         if (_drag != Drag.None && pad == _dragPad)
         {
@@ -140,10 +141,13 @@ sealed class Gestures
         if (_mode == Mode.None && DragMouse(msg, info)) return true;
         if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN)
         {
-            var pad = _modePad ?? FreshPad(p => ClickFingers(p) >= 3);
-            if (pad != null)
+            if (_modePad == null)
             {
-                Start(pad, ClickFingers(pad));
+                if (FreshPad(p => EdgeKey(p) != null) is Pad edge) StartEdge(edge, EdgeKey(edge)!.Value);
+                else if (FreshPad(p => p.Contacts >= 3 && ClickFingers(p) == 3) is Pad pad) StartMiddle(pad);
+            }
+            if (_modePad != null)
+            {
                 _swallowing = true;
                 return true;
             }
@@ -157,12 +161,14 @@ sealed class Gestures
         return false;
     }
 
-    // ---- Three and four fingers.
+    // ---- Three fingers.
 
     // How many fingers a click is made with, by how they landed. The last fingers to
     // land within TogetherMs of each other are the fresh group:
     //   3+ fresh             -> that many; a finger resting before (a thumb) is left out;
-    //   2 fresh              -> every finger: one finger pointing, two added to click;
+    //   2 fresh              -> those two plus the older fingers that were moving: one
+    //                           finger pointing, two added to click. A still one is a
+    //                           resting thumb, and the click is a two-finger one;
     //   1 fresh, soon after  -> every finger: a slow but single motion;
     //   1 fresh, later       -> 1: the others rest, the click is that finger's.
     static int ClickFingers(Pad pad)
@@ -170,81 +176,56 @@ sealed class Gestures
         var before = pad.Landings(); // longest first, the last finger at 0
         int fresh = before.Count(ms => ms <= TogetherMs);
         if (fresh >= 3) return fresh;
-        if (fresh == 2) return before.Length;
+        if (fresh == 2)
+        {
+            long last = pad.LastLanding;
+            return 2 + pad.MovedSince(last - PointingMs, last - TogetherMs);
+        }
         return before.Length >= 2 && before[^2] <= SameMotionMs ? before.Length : 1;
     }
 
-    void Start(Pad pad, int fingers)
+    // The media key for a one-finger click at the right edge, or null elsewhere.
+    static ushort? EdgeKey(Pad pad)
+    {
+        if (pad.Contacts != 1 || pad.YFingers != 1) return null;
+        double x = (pad.Xs[0] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
+        if (x < 1 - EdgeWidth) return null;
+        // Y grows downward.
+        double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
+        return y < 1.0 / 3 ? VK_VOLUME_UP : y > 2.0 / 3 ? VK_VOLUME_DOWN : VK_MEDIA_PLAY_PAUSE;
+    }
+
+    void StartMiddle(Pad pad)
     {
         if (_mode != Mode.None) return;
+        _mode = Mode.Middle;
         _modePad = pad;
-        string where = "";
-        if (fingers >= 4)
+        Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
+        Log.Write($"middle (3 fingers, landed {pad.LandingsText} ms before the last)");
+    }
+
+    // Play/pause goes at once; a volume step repeats while held.
+    void StartEdge(Pad pad, ushort key)
+    {
+        if (_mode != Mode.None) return;
+        _mode = Mode.Edge;
+        _modePad = pad;
+        Effects.Key(key);
+        if (key != VK_MEDIA_PLAY_PAUSE)
         {
-            // Play/pause waits for the release: a slide in between means volume instead.
-            _mode = Mode.FourFinger;
-            _anchorY = pad.Y;
-            _anchorFingers = pad.YFingers;
-            _travel = 0;
-            _sliding = false;
-            // Y grows downward; with no finger positions fall back to the middle zone.
-            double at = pad.YFingers > 0 ? (pad.Y - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin) : 0.5;
-            _repeatKey = at < 1.0 / 3 ? VK_VOLUME_UP : at > 2.0 / 3 ? VK_VOLUME_DOWN : (ushort)0;
-            if (_repeatKey != 0)
-            {
-                Effects.Key(_repeatKey);
-                _repeat.Change(RepeatDelayMs, RepeatMs);
-                where = _repeatKey == VK_VOLUME_UP ? " top" : " bottom";
-            }
+            _repeatKey = key;
+            _repeat.Change(RepeatDelayMs, RepeatMs);
         }
-        else
-        {
-            _mode = Mode.Middle;
-            Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
-        }
-        Log.Write($"{_mode} ({fingers} fingers, landed {pad.LandingsText} ms before the last){where}");
+        Log.Write(key switch { VK_VOLUME_UP => "edge: volume up", VK_VOLUME_DOWN => "edge: volume down", _ => "edge: play/pause" });
     }
 
     void End()
     {
         if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
-        if (_mode == Mode.FourFinger)
-        {
-            _repeat.Change(Timeout.Infinite, Timeout.Infinite);
-            if (_repeatKey != 0) _repeatKey = 0;
-            else if (!_sliding)
-            {
-                Effects.Key(VK_MEDIA_PLAY_PAUSE);
-                Log.Write("play/pause");
-            }
-            else Effects.VolumeEnd();
-        }
+        _repeat.Change(Timeout.Infinite, Timeout.Infinite);
+        _repeatKey = 0;
         _mode = Mode.None;
         _modePad = null;
-    }
-
-    void Slide(Pad pad)
-    {
-        if (pad.YFingers == 0) return;
-        // A finger landing or lifting jumps the average; measure afresh from here.
-        if (pad.YFingers != _anchorFingers)
-        {
-            _anchorY = pad.Y;
-            _anchorFingers = pad.YFingers;
-            return;
-        }
-        // Y grows downward: fingers moving up give positive travel.
-        _travel += (_anchorY - pad.Y) / Math.Max(1, pad.YMax - pad.YMin);
-        _anchorY = pad.Y;
-        if (!_sliding)
-        {
-            if (Math.Abs(_travel) < StillTravel) return;
-            _sliding = true;
-            Effects.VolumeBegin(_travel > 0);
-            _travel = 0;
-            return;
-        }
-        Effects.VolumeTo(_travel);
     }
 
     // ---- Two fingers.

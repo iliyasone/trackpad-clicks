@@ -22,7 +22,12 @@ sealed class Pad
     public readonly double[] Xs = new double[MaxFingers], Ys = new double[MaxFingers];
     // When each finger now touching landed, by contact ID.
     public readonly Dictionary<uint, long> Landed = new();
+    // Where each finger was when it last moved, and when that was (0: not since landing).
+    readonly Dictionary<uint, (double X, double Y, long At)> _moved = new();
     readonly List<uint> _lifted = new();
+
+    // Travel, as a share of the pad's width, that counts as the finger moving (~3 mm).
+    const double MoveStep = 0.02;
 
     public void Apply(in Frame frame)
     {
@@ -44,10 +49,29 @@ sealed class Pad
             _lifted.Clear();
             foreach (var id in Landed.Keys)
                 if (!ids.Contains(id)) _lifted.Add(id);
-            foreach (var id in _lifted) Landed.Remove(id);
+            foreach (var id in _lifted)
+            {
+                Landed.Remove(id);
+                _moved.Remove(id);
+            }
         }
-        foreach (var id in ids) Landed.TryAdd(id, now);
+        double step = MoveStep * Math.Max(1, XMax - XMin);
+        for (int i = 0; i < frame.Fingers; i++)
+        {
+            uint id = frame.Ids[i];
+            Landed.TryAdd(id, now);
+            if (!_moved.TryGetValue(id, out var m)) _moved[id] = (frame.Xs[i], frame.Ys[i], 0);
+            else if (Math.Abs(frame.Xs[i] - m.X) + Math.Abs(frame.Ys[i] - m.Y) > step) _moved[id] = (frame.Xs[i], frame.Ys[i], now);
+        }
     }
+
+    // How many fingers that landed before `before` have moved since `since`: a finger
+    // pointing, as opposed to one resting on the pad (a thumb).
+    public int MovedSince(long since, long before) =>
+        Landed.Count(f => f.Value < before && _moved.TryGetValue(f.Key, out var m) && m.At >= since);
+
+    // When the last finger landed; a contact the reports have not shown yet, just now.
+    public long LastLanding => Landed.Count < Contacts || Landed.Count == 0 ? LastReport : Landed.Values.Max();
 
     // How long before the last finger to land each finger landed, longest first.
     // A contact the reports have not shown yet has just landed.

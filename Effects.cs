@@ -72,57 +72,6 @@ static class Effects
 
     static void Send(INPUT input) => SendInput(1, new[] { input }, Marshal.SizeOf<INPUT>());
 
-    // ---- Volume slide: one volume key brings up the Windows flyout, then the level is
-    // set directly through Core Audio from the travel since then.
-
-    // Volume change per full height of the pad.
-    const double VolumeGain = 0.5;
-    // Wait at most this long for the flyout key to land before setting the level.
-    const int KeySettleMs = 150;
-
-    static object? _endpoint;
-    static float _base;
-    // Travel past either end is dropped, so reversing direction answers at once.
-    static double _pin;
-    static double _volumeTravel;
-    static int _volumeQueued;
-
-    public static void VolumeBegin(bool up) => Worker.Post("volume begin", () =>
-    {
-        _endpoint = Audio.Endpoint();
-        if (_endpoint == null) return;
-        float from = Audio.Get(_endpoint);
-        SendKey(up ? VK_VOLUME_UP : VK_VOLUME_DOWN);
-        // Setting the level before the key lands would let the key add its 2% on top.
-        long start = Environment.TickCount64;
-        while (Audio.Get(_endpoint) == from && Environment.TickCount64 - start < KeySettleMs) Thread.Sleep(5);
-        _base = Audio.Get(_endpoint);
-        _pin = 0;
-    });
-
-    // Only the latest travel matters: one queued update at a time.
-    public static void VolumeTo(double travel)
-    {
-        Volatile.Write(ref _volumeTravel, travel);
-        if (Interlocked.Exchange(ref _volumeQueued, 1) == 1) return;
-        Worker.Post("volume set", () =>
-        {
-            Interlocked.Exchange(ref _volumeQueued, 0);
-            if (_endpoint == null) return;
-            double t = Volatile.Read(ref _volumeTravel) - _pin;
-            double level = _base + t * VolumeGain;
-            if (level > 1) { _pin += (level - 1) / VolumeGain; level = 1; }
-            if (level < 0) { _pin += level / VolumeGain; level = 0; }
-            Audio.Set(_endpoint, (float)level);
-        });
-    }
-
-    public static void VolumeEnd() => Worker.Post("volume end", () =>
-    {
-        if (_endpoint != null) Log.WriteNow($"volume {Audio.Get(_endpoint):P0}");
-        _endpoint = null;
-    });
-
     // ---- Window drag.
 
     static IntPtr _window;
