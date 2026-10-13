@@ -312,7 +312,9 @@ sealed class Gestures
             GestureAction.VolumeDown => VK_VOLUME_DOWN,
             _ => VK_VOLUME_MUTE,
         };
-        Effects.Key(key);
+        if (key is VK_MEDIA_PLAY_PAUSE or VK_MEDIA_NEXT_TRACK or VK_MEDIA_PREV_TRACK && Settings.Current.MediaApp is { Length: > 0 } app)
+            Effects.MediaKey(app, _action);
+        else Effects.Key(key);
         if (key is VK_VOLUME_UP or VK_VOLUME_DOWN)
         {
             _repeatKey = key;
@@ -371,13 +373,19 @@ sealed class Gestures
         if (pressing < 2 && now - _secondSince < SecondPairMs) return;
         _second = pressing >= 2 ? 2 : 1;
         Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
+        if (config.Haptic) Effects.Haptic(0x060617);
         Log.Write($"{_slot}: second press, {(_second == 2 ? "right" : "left")} down");
         Note(_slot, _second == 2 ? "second-right" : "second-left");
     }
 
     void EndSecond()
     {
-        if (_second != 0) Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP);
+        if (_second != 0)
+        {
+            Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP);
+            // A lighter click on release, as the pad does for its own button.
+            if (Settings.Current.Haptic) Effects.Haptic(0x040415);
+        }
         _second = 0;
         _secondSince = 0;
     }

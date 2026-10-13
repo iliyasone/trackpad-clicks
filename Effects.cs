@@ -42,6 +42,12 @@ static class Effects
 
     public static void Key(ushort vk) => Worker.Post($"SendInput key 0x{vk:X}", () => SendKey(vk));
 
+    // Play/pause or a track key for one app's media session (see Media.cs).
+    public static void MediaKey(string app, GestureAction action) => Worker.Post($"media {action} to {app}", () =>
+    {
+        if (!Media.Send(app, action)) Log.WriteNow($"media {action}: nothing from \"{app}\" is playing");
+    });
+
     // Released without travel: the held-back press becomes the click it was.
     public static void Click(bool right) => Worker.Post("SendInput click", () =>
     {
@@ -127,4 +133,35 @@ static class Effects
             SetCursorPos(_from.X + dx, _from.Y + dy);
         });
     }
+
+    // ---- Haptics: a click under the finger, through the Magic Trackpad driver's
+    // \\.\AmtPtpHapticDeviceUm (IOCTL_PTPFILTER_ACTUATE, from the change proposed in
+    // vitoplantamura/MagicTrackpad2ForWindows#63). Without that driver, nothing happens.
+
+    const uint IoctlActuate = 0x0022A008;
+    static Microsoft.Win32.SafeHandles.SafeFileHandle? _haptic;
+    static long _hapticRetryAt;
+
+    // Strength in the driver's FeedbackClick encoding (0x060617: medium).
+    public static void Haptic(uint strength) => Worker.Post("haptic click", () =>
+    {
+        long now = Environment.TickCount64;
+        if (_haptic == null || _haptic.IsInvalid)
+        {
+            if (now < _hapticRetryAt) return;
+            _haptic = CreateFile(@"\\.\AmtPtpHapticDeviceUm", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+            if (_haptic.IsInvalid)
+            {
+                // Not this driver: look again in a minute, not on every click.
+                _hapticRetryAt = now + 60_000;
+                return;
+            }
+        }
+        if (!DeviceIoControl(_haptic, IoctlActuate, ref strength, 4, IntPtr.Zero, 0, out _, IntPtr.Zero))
+        {
+            Log.WriteNow($"haptic click failed {Marshal.GetLastWin32Error()}");
+            _haptic.Dispose();
+            _haptic = null;
+        }
+    });
 }

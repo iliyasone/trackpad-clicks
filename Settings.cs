@@ -45,6 +45,12 @@ sealed record Config
     // hard (0..255, driver 2.2+) is a second click: left, or right with two fingers.
     public bool SecondPress { get; init; } = true;
     public int PressForce { get; init; } = 70;
+    // A click under the finger on the second press; needs the driver change in
+    // vitoplantamura/MagicTrackpad2ForWindows#63.
+    public bool Haptic { get; init; } = true;
+    // Play/pause and the track keys go only to this app's media session (part of its
+    // id, e.g. "chrome"); empty: to whatever Windows picks, like a media key.
+    public string MediaApp { get; init; } = "chrome";
 
     public Binding For(string slot) => Gestures.TryGetValue(slot, out var b) ? b : new(GestureAction.Windows);
 

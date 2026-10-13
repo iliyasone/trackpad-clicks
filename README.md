@@ -28,6 +28,13 @@ already down, so pressing another finger makes no new click. With Magic Trackpad
 driver 2.2 or later, which reports each finger's pressure, another finger pressing past
 the set force presses the left button, two fingers the right one, until they ease off.
 On by default; the force is a slider. The test panel shows each finger's pressure.
+With a driver that has the haptic command proposed in
+[MagicTrackpad2ForWindows#63](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/pull/63),
+the pad also clicks under the finger on the second press and its release.
+
+**Music.** Media keys go to whichever app Windows considers current, often the agent's
+voice instead of the music. Play/pause and the track actions therefore go to one app's
+media session, Chrome by default, chosen in the window; "any" behaves like a media key.
 
 **Тест** in the window's header shows what the program sees: the button, the finger
 count, the last gestures and what they did, and the raw bytes of each report, with the
@@ -102,12 +109,16 @@ and the logon task runs as user `iliya`. Adapt both before using it.
 
 ## Updates
 
-Nothing is installed while you work. `scripts/stage-update.sh "notes" [driver-dir
+Nothing is installed while you work. TrackpadClicks checks the latest GitHub release a
+minute after start and every 6 hours (or **Проверить обновления** in the tray menu) and
+downloads a newer one into `C:\TrackpadClicks\update`. Or `scripts/stage-update.sh "notes" [driver-dir
 driver-version]` builds and puts the new exe, and optionally a Magic Trackpad driver
 package, into `C:\TrackpadClicks\update`. The tray shows a notice, and the menu and the
 settings window get an **Установить** button; a `trackpadclicks://update` link (Win+R
 works too) does the same. Installing runs `pnputil` for the driver (Windows asks for
-admin rights), swaps the exe and restarts it.
+admin rights), swaps the exe and restarts it. A driver folder with an `install.ps1`
+runs that instead: `scripts/test-driver/install.ps1` installs a test-signed driver from a
+fork's CI build (test mode, Secure Boot off; BitLocker is suspended for the one restart).
 
 `scripts/deploy.sh` still installs at once, for the first install or when nobody is at
 the PC.

@@ -114,8 +114,16 @@ sealed class SettingsWindow : Form
             ["enabled"] = Gestures.Enabled,
             ["version"] = Updater.Current,
             ["update"] = JsonSerializer.SerializeToNode(Updater.Check(), Settings.Json),
+            // Off the UI thread: the media session list is a WinRT call.
+            ["mediaApps"] = JsonSerializer.SerializeToNode(MediaApps()),
         };
         _web.CoreWebView2.PostWebMessageAsJson(state.ToJsonString());
+    }
+
+    static string[] MediaApps()
+    {
+        var apps = Task.Run(Media.Apps);
+        return apps.Wait(1500) ? apps.Result : Array.Empty<string>();
     }
 
     void SendLive()

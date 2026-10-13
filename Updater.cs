@@ -4,9 +4,11 @@ using System.Text.Json;
 
 namespace TrackpadClicks;
 
-// Updates are never applied by themselves. scripts/stage-update.sh puts one into
-// C:\TrackpadClicks\update: update.json, the new TrackpadClicks.exe, and optionally a
-// driver/ folder with a Magic Trackpad driver package. It is applied only when the user
+// Updates are never applied by themselves. One gets into C:\TrackpadClicks\update in
+// two ways: Fetch downloads the latest GitHub release when it is newer (at start-up and
+// every 6 hours), or scripts/stage-update.sh puts one there. It holds update.json, the
+// new TrackpadClicks.exe, and optionally a driver/ folder with a Magic Trackpad driver
+// package (and an install.ps1 to run instead of plain pnputil). It is applied only when the user
 // asks: the tray menu, the settings window, or a trackpadclicks://update link, which
 // Windows opens with this exe (registered at start-up, per user).
 //
@@ -62,13 +64,18 @@ static class Updater
         if (pending == null) return "Обновления нет.";
         Log.WriteNow($"update {Current} -> {pending.Version}{(pending.Driver != null ? $", driver {pending.Driver}" : "")}");
 
-        var inf = Directory.Exists(Path.Combine(Dir, "driver"))
-            ? Directory.GetFiles(Path.Combine(Dir, "driver"), "*.inf").FirstOrDefault() : null;
+        string driverDir = Path.Combine(Dir, "driver");
+        var inf = Directory.Exists(driverDir) ? Directory.GetFiles(driverDir, "*.inf").FirstOrDefault() : null;
+        string script = Path.Combine(driverDir, "install.ps1");
+        bool reboot = false;
         if (pending.Driver != null && inf != null)
         {
             try
             {
-                using var pnputil = Process.Start(new ProcessStartInfo("pnputil.exe", $"/add-driver \"{inf}\" /install")
+                var start = File.Exists(script)
+                    ? new ProcessStartInfo("powershell.exe", $"-NoProfile -ExecutionPolicy Bypass -File \"{script}\"")
+                    : new ProcessStartInfo("pnputil.exe", $"/add-driver \"{inf}\" /install");
+                using var pnputil = Process.Start(new ProcessStartInfo(start.FileName, start.Arguments)
                 {
                     UseShellExecute = true,
                     Verb = "runas",
@@ -81,7 +88,8 @@ static class Updater
                     Log.WriteNow($"update: pnputil exit {pnputil.ExitCode}");
                     return $"Драйвер не установился (pnputil, код {pnputil.ExitCode}).";
                 }
-                Log.WriteNow($"update: driver installed, pnputil exit {pnputil.ExitCode}");
+                Log.WriteNow($"update: driver installed, exit {pnputil.ExitCode}");
+                reboot = pnputil.ExitCode == 3010;
                 Directory.Delete(Path.Combine(Dir, "driver"), true);
             }
             catch (Win32Exception e) when (e.NativeErrorCode == 1223)
@@ -101,6 +109,10 @@ static class Updater
         }
         File.Move(Manifest, Path.Combine(Dir, $"applied-{pending.Version}.json"), true);
 
+        if (reboot)
+            MessageBox.Show("Драйвер установлен. Перезагрузи компьютер, когда будет удобно: он заработает после перезагрузки.",
+                "TrackpadClicks", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
         int me = Environment.ProcessId;
         foreach (var other in Process.GetProcessesByName("TrackpadClicks"))
             try { if (other.Id != me) other.Kill(); } catch { }
@@ -114,6 +126,45 @@ static class Updater
         Process.Start(installed, $"--replace {me}");
         Environment.Exit(0);
         return null;
+    }
+
+    // ---- GitHub releases.
+
+    const string Releases = "https://api.github.com/repos/iliyasone/trackpad-clicks/releases/latest";
+    static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
+
+    // Downloads the latest release when it is newer than this exe and than what is
+    // staged. Never on the effects worker: it waits on the network.
+    public static async Task Fetch()
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, Releases);
+            request.Headers.UserAgent.ParseAdd($"TrackpadClicks/{Current}");
+            using var response = await Http.SendAsync(request);
+            if (!response.IsSuccessStatusCode) return;
+            using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            var root = json.RootElement;
+            string version = root.GetProperty("tag_name").GetString()!.TrimStart('v');
+            if (!System.Version.TryParse(version, out var v) || !System.Version.TryParse(Current, out var c) || v <= c) return;
+            if (Check() is Pending staged && System.Version.TryParse(staged.Version, out var s) && s >= v) return;
+            string? url = root.GetProperty("assets").EnumerateArray()
+                .Where(a => a.GetProperty("name").GetString() == "TrackpadClicks.exe")
+                .Select(a => a.GetProperty("browser_download_url").GetString()).FirstOrDefault();
+            if (url == null) return;
+            Directory.CreateDirectory(Dir);
+            string exe = Path.Combine(Dir, "TrackpadClicks.exe");
+            using (var download = await Http.GetStreamAsync(url))
+            using (var file = File.Create(exe + ".part"))
+                await download.CopyToAsync(file);
+            File.Move(exe + ".part", exe, true);
+            // Release notes: the first lines after the signature block, as plain text.
+            string notes = string.Join(" ", (root.GetProperty("body").GetString() ?? "").Split('\n')
+                .Select(l => l.Trim().TrimStart('-', '*', ' ').Replace("**", "")).Where(l => l.Length > 0 && !l.StartsWith(">")).Take(3));
+            File.WriteAllText(Manifest, JsonSerializer.Serialize(new Pending(version, notes, null), Settings.Json));
+            Log.WriteNow($"update {version} downloaded from GitHub");
+        }
+        catch (Exception e) { Log.WriteNow($"update check failed: {e.Message}"); }
     }
 
     // At start-up: the staged exe is no longer needed once it runs from the install folder.

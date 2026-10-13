@@ -129,4 +129,14 @@ static class Native
     [DllImport("hid.dll")]
     public static extern int HidP_GetUsages(int reportType, ushort usagePage, ushort linkCollection,
         [Out] ushort[] usages, ref uint usageLength, IntPtr preparsed, IntPtr report, uint reportLength);
+
+    public const uint GENERIC_WRITE = 0x40000000, FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, OPEN_EXISTING = 3;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security,
+        uint creation, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle device, uint code, ref uint input, uint inputSize,
+        IntPtr output, uint outputSize, out uint returned, IntPtr overlapped);
 }
