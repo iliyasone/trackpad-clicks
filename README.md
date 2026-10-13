@@ -7,8 +7,11 @@ TrackpadClicks binds them to real *clicks*, so a light touch never triggers anyt
 | Click | What it does |
 | --- | --- |
 | 3 fingers | Middle mouse button |
+| 1 finger, left edge, top third | Next track |
+| 1 finger, left edge, middle third | Media play/pause |
+| 1 finger, left edge, bottom third | Previous track |
 | 1 finger, right edge, top third | Volume up a step; hold to repeat |
-| 1 finger, right edge, middle third | Media play/pause |
+| 1 finger, right edge, middle third | Middle mouse button (e.g. push-to-talk recording) |
 | 1 finger, right edge, bottom third | Volume down a step; hold to repeat |
 | 2 fingers, hold, both fingers slide | Drag the window under the cursor, grabbed from any point |
 | 2 fingers, hold, one finger stays, one slides | Normal selection drag, as without TrackpadClicks |
@@ -20,7 +23,7 @@ any finger already resting, so pointing with one finger and clicking with two mo
 a three-finger click. A single finger added to resting ones more than 0.4 s after
 them is a click by that finger alone and goes to Windows as usual.
 
-The right edge is a strip about 12% of the pad's width. A thumb resting on the pad
+Each edge is a strip a fifth of the pad's width: the left one up to 20%, the right one from 80%. A thumb resting on the pad
 while two fingers click does not make the click a three-finger one: an older finger
 counts only if it moved shortly before. Four-finger clicks are left to Windows.
 One- and two-finger clicks otherwise work as usual.

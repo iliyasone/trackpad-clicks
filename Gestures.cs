@@ -7,10 +7,11 @@
 // third goes to Windows.
 //
 // Click with 3 fingers = middle button. Four or more fingers: nothing, left to Windows.
-// Click with 1 finger at the right edge of the pad, by height:
-//   top third    = volume up a step; held, it repeats like a held key;
-//   middle third = media play/pause;
-//   bottom third = volume down, like the top.
+// Click with 1 finger (a thumb, say) at an edge of the pad, by height:
+//                  left edge         right edge
+//   top third      next track        volume up a step; held, it repeats like a held key
+//   middle third   media play/pause  middle button (record)
+//   bottom third   previous track    volume down, like volume up
 // Click with 2 fingers: Windows makes it a left press (one finger holds the click, the
 // other drags a selection) or a right click, and which one the user means is not known
 // at press time. So the press is held back and the fingers decide:
@@ -41,8 +42,10 @@ sealed class Gestures
     // An older finger that moved within this before the last landing was pointing,
     // not resting, and is counted in the click.
     const long PointingMs = 1500;
-    // The right edge strip with the media clicks, as a share of the pad's width (~19 mm).
-    const double EdgeWidth = 0.12;
+    // The edge strips with the media clicks, each as a share of the pad's width (~32 mm).
+    const double EdgeWidth = 0.2;
+    // EdgeKey's answer for the right edge's middle: the middle button, not a key.
+    const ushort EdgeMiddle = 0;
     // Held top/bottom click: first repeat after this, then one step per RepeatMs.
     const int RepeatDelayMs = 350, RepeatMs = 60;
     // Finger travel, as a share of the pad's width, that counts as moving (~4 mm).
@@ -57,7 +60,7 @@ sealed class Gestures
     Pad? _modePad;
     bool _swallowing;
 
-    // Edge click: the volume key held, or 0 for play/pause.
+    // Edge click: the volume key held, or 0 for any other.
     ushort _repeatKey;
     readonly System.Threading.Timer _repeat;
 
@@ -184,15 +187,20 @@ sealed class Gestures
         return before.Length >= 2 && before[^2] <= SameMotionMs ? before.Length : 1;
     }
 
-    // The media key for a one-finger click at the right edge, or null elsewhere.
+    // The media key for a one-finger click at an edge (EdgeMiddle for the middle
+    // button), or null elsewhere.
     static ushort? EdgeKey(Pad pad)
     {
         if (pad.Contacts != 1 || pad.YFingers != 1) return null;
         double x = (pad.Xs[0] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
-        if (x < 1 - EdgeWidth) return null;
+        bool left = x <= EdgeWidth;
+        if (!left && x < 1 - EdgeWidth) return null;
         // Y grows downward.
         double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
-        return y < 1.0 / 3 ? VK_VOLUME_UP : y > 2.0 / 3 ? VK_VOLUME_DOWN : VK_MEDIA_PLAY_PAUSE;
+        int third = y < 1.0 / 3 ? 0 : y > 2.0 / 3 ? 2 : 1;
+        return left
+            ? third switch { 0 => VK_MEDIA_NEXT_TRACK, 1 => VK_MEDIA_PLAY_PAUSE, _ => VK_MEDIA_PREV_TRACK }
+            : third switch { 0 => VK_VOLUME_UP, 1 => EdgeMiddle, _ => VK_VOLUME_DOWN };
     }
 
     void StartMiddle(Pad pad)
@@ -204,19 +212,34 @@ sealed class Gestures
         Log.Write($"middle (3 fingers, landed {pad.LandingsText} ms before the last)");
     }
 
-    // Play/pause goes at once; a volume step repeats while held.
+    // A track key or play/pause goes at once; a volume step repeats while held; the
+    // middle button is held while the pad is.
     void StartEdge(Pad pad, ushort key)
     {
         if (_mode != Mode.None) return;
-        _mode = Mode.Edge;
         _modePad = pad;
+        if (key == EdgeMiddle)
+        {
+            _mode = Mode.Middle;
+            Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
+            Log.Write("edge: middle");
+            return;
+        }
+        _mode = Mode.Edge;
         Effects.Key(key);
-        if (key != VK_MEDIA_PLAY_PAUSE)
+        if (key is VK_VOLUME_UP or VK_VOLUME_DOWN)
         {
             _repeatKey = key;
             _repeat.Change(RepeatDelayMs, RepeatMs);
         }
-        Log.Write(key switch { VK_VOLUME_UP => "edge: volume up", VK_VOLUME_DOWN => "edge: volume down", _ => "edge: play/pause" });
+        Log.Write(key switch
+        {
+            VK_VOLUME_UP => "edge: volume up",
+            VK_VOLUME_DOWN => "edge: volume down",
+            VK_MEDIA_NEXT_TRACK => "edge: next track",
+            VK_MEDIA_PREV_TRACK => "edge: previous track",
+            _ => "edge: play/pause",
+        });
     }
 
     void End()
