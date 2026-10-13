@@ -7,12 +7,12 @@ TrackpadClicks binds them to real *clicks*, so a light touch never triggers anyt
 | Click | What it does |
 | --- | --- |
 | 3 fingers | Middle mouse button |
-| 1 finger, left edge, top third | Volume up a step; hold to repeat |
-| 1 finger, left edge, middle third | Media play/pause |
-| 1 finger, left edge, bottom third | Volume down a step; hold to repeat |
-| 1 finger, right edge, top third | Next track |
-| 1 finger, right edge, middle third | Middle mouse button (e.g. push-to-talk voice input) |
-| 1 finger, right edge, bottom third | Previous track |
+| 1 finger, left edge, top third | Next track |
+| 1 finger, left edge, middle third | Middle mouse button (e.g. push-to-talk voice input) |
+| 1 finger, left edge, bottom third | Previous track |
+| 1 finger, right edge, top third | Volume up a step; hold to repeat |
+| 1 finger, right edge, middle third | Media play/pause |
+| 1 finger, right edge, bottom third | Volume down a step; hold to repeat |
 | 2 fingers, hold, both fingers slide | Drag the window under the cursor, grabbed from any point |
 | 2 fingers, hold, one finger stays, one slides | Normal selection drag, as without TrackpadClicks |
 | 2 fingers, release in place | Normal click (right or left, as Windows decided) |
