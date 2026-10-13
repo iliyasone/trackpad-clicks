@@ -49,6 +49,10 @@ sealed record Config
     // Width of the left and right edge strips, in percent of the pad's width.
     public int LeftEdge { get; init; } = 30;
     public int RightEdge { get; init; } = 20;
+    // Height of the middle zone of each edge, in percent of the pad's height; the top and
+    // bottom zones share the rest.
+    public int LeftMiddle { get; init; } = 34;
+    public int RightMiddle { get; init; } = 34;
     public int HoldMs { get; init; } = 400;
     // While an edge zone holds the middle button, another finger pressing at least this
     // hard (0..255, driver 2.2+) is a second click: left, or right with two fingers.
@@ -74,6 +78,8 @@ sealed record Config
             Gestures = gestures,
             LeftEdge = Math.Clamp(LeftEdge, 5, 45),
             RightEdge = Math.Clamp(RightEdge, 5, 45),
+            LeftMiddle = Math.Clamp(LeftMiddle == 0 ? 34 : LeftMiddle, 10, 80),
+            RightMiddle = Math.Clamp(RightMiddle == 0 ? 34 : RightMiddle, 10, 80),
             HoldMs = Math.Clamp(HoldMs, 150, 2000),
             PressForce = Math.Clamp(PressForce, 10, 250),
         };

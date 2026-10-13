@@ -8,7 +8,7 @@
 //
 // What a click does comes from the settings (Settings.cs): a click with 3 or with 4
 // fingers, and a click with 1 finger (a thumb, say) in one of six edge zones — the left
-// or right strip of the pad, by thirds of its height. Each gets an action: the middle
+// or right strip of the pad, split in three by height (the middle one's height set per side). Each gets an action: the middle
 // button or mouse button 5 (held while the pad is; after a Hold trigger, for at least
 // MinHeldMs, so an app never takes a held gesture for a short tap), a media key, a volume step (repeating while held like
 // a held key), a T3 Code agent action (send, stop, voice), or nothing, left to Windows. With the Hold trigger the press is held back:
@@ -256,9 +256,10 @@ sealed class Gestures
         double x = (pad.Xs[0] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
         string side = x <= config.LeftEdge / 100.0 ? "left" : x >= 1 - config.RightEdge / 100.0 ? "right" : "";
         if (side == "") return null;
-        // Y grows downward.
+        // Y grows downward; the middle zone is centered, its height set per side.
         double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
-        return side + (y < 1.0 / 3 ? "-top" : y > 2.0 / 3 ? "-bottom" : "-middle");
+        double edge = (1 - (side == "left" ? config.LeftMiddle : config.RightMiddle) / 100.0) / 2;
+        return side + (y < edge ? "-top" : y > 1 - edge ? "-bottom" : "-middle");
     }
 
     void Start(Pad pad, string slot)

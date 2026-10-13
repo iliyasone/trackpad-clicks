@@ -207,6 +207,14 @@
         <input type="range" id="right-edge" min="5" max="45" step="1">
       </div>
       <div class="slider">
+        <span>Середина слева</span><output id="left-mid-out"></output>
+        <input type="range" id="left-mid" min="10" max="80" step="1">
+      </div>
+      <div class="slider">
+        <span>Середина справа</span><output id="right-mid-out"></output>
+        <input type="range" id="right-mid" min="10" max="80" step="1">
+      </div>
+      <div class="slider">
         <span>Время удержания</span><output id="hold-out"></output>
         <input type="range" id="hold" min="150" max="1200" step="50">
       </div>
@@ -308,6 +316,8 @@ function render() {
   $('right').style.width = config.rightEdge + '%';
   pad.style.setProperty('--hold', config.holdMs + 'ms');
   for (const side of ['left', 'right']) {
+    const mid = side === 'left' ? config.leftMiddle : config.rightMiddle;
+    $(side).style.gridTemplateRows = `${100 - mid}fr ${2 * mid}fr ${100 - mid}fr`;
     $(side).innerHTML = ['top', 'middle', 'bottom'].map(h => zoneHtml(`${side}-${h}`)).join('');
   }
   $('cards').innerHTML = ['three', 'four'].map(slot => {
@@ -330,6 +340,8 @@ function render() {
     : 'Действие сразу при нажатии; обычного клика в этой зоне нет.';
   $('left-edge').value = config.leftEdge; $('left-out').textContent = config.leftEdge + '%';
   $('right-edge').value = config.rightEdge; $('right-out').textContent = config.rightEdge + '%';
+  $('left-mid').value = config.leftMiddle; $('left-mid-out').textContent = config.leftMiddle + '%';
+  $('right-mid').value = config.rightMiddle; $('right-mid-out').textContent = config.rightMiddle + '%';
   $('hold').value = config.holdMs; $('hold-out').textContent = config.holdMs + ' мс';
   $('second').classList.toggle('on', config.secondPress);
   $('force').value = config.pressForce; $('force-out').textContent = config.pressForce;
@@ -395,7 +407,9 @@ $('banner-install').onclick = () => {
 $('left-edge').oninput = e => { config.leftEdge = +e.target.value; render(); };
 $('right-edge').oninput = e => { config.rightEdge = +e.target.value; render(); };
 $('hold').oninput = e => { config.holdMs = +e.target.value; render(); };
-$('left-edge').onchange = $('right-edge').onchange = $('hold').onchange = () => change(() => {});
+$('left-mid').oninput = e => { config.leftMiddle = +e.target.value; render(); };
+$('right-mid').oninput = e => { config.rightMiddle = +e.target.value; render(); };
+$('left-edge').onchange = $('right-edge').onchange = $('left-mid').onchange = $('right-mid').onchange = $('hold').onchange = () => change(() => {});
 let testing = false;
 $('test-toggle').onclick = () => {
   testing = !testing;
@@ -502,7 +516,7 @@ if (host) {
   version = '0.3.0';
   update = { version: '0.3.0', notes: 'Второе нажатие по силе пальца, правый клик двумя пальцами врозь', driver: '2.2' };
   mediaApps = ['Chrome', 'T3 Code'];
-  config = { leftEdge: 30, rightEdge: 20, holdMs: 400, secondPress: true, pressForce: 70, haptic: true, mediaApp: 'chrome', gestures: {
+  config = { leftEdge: 30, rightEdge: 20, leftMiddle: 34, rightMiddle: 50, holdMs: 400, secondPress: true, pressForce: 70, haptic: true, mediaApp: 'chrome', gestures: {
     'left-top': { action: 'nextTrack', trigger: 'hold' }, 'left-middle': { action: 'dictationButton', trigger: 'hold' },
     'left-bottom': { action: 'prevTrack', trigger: 'hold' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
     'right-middle': { action: 'playPause', trigger: 'click' }, 'right-bottom': { action: 'volumeDown', trigger: 'click' },
@@ -513,7 +527,7 @@ if (host) {
   setInterval(() => {
     t += 0.02;
     const y = 0.5 + 0.42 * Math.sin(t);
-    const under = 'right-' + (y < 1 / 3 ? 'top' : y > 2 / 3 ? 'bottom' : 'middle');
+    const e = (1 - config.rightMiddle / 100) / 2, under = 'right-' + (y < e ? 'top' : y > 1 - e ? 'bottom' : 'middle');
     const pressed = Math.sin(t * 3) > 0.9;
     live = { aspect: 1.503, fingers: [[0.9, y, 40 + Math.round(30 * Math.sin(t * 2))], [0.45, 0.6, pressed ? 120 : 15]], pressed, active: pressed ? under : null, waiting: false, under,
       contacts: 2, events: [{ seq: 1, slot: 'left-middle', what: 'action', action: 'middleClick' }, { seq: 2, slot: 'right-top', what: 'early', action: 'volumeUp' }],
