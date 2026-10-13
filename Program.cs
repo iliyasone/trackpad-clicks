@@ -5,7 +5,7 @@
 //   mouse hook  — decides swallow/pass from memory only (MouseHook.cs);
 //   raw input   — reads the touchpads' HID reports (RawInput.cs);
 //   effects     — SendInput, volume, window moves, the log (Effects.cs);
-//   UI          — the tray icon, and the watch over the other two.
+//   UI          — the tray icon, the settings window, and the watch over the other two.
 // Every mouse event in the system waits for the hook, so a call that hangs must never
 // run on it. A stuck raw input or effects thread only switches gestures off, shown in
 // the tray.
@@ -53,7 +53,9 @@ sealed class Tray : ApplicationContext
     readonly NotifyIcon _icon;
     readonly ToolStripMenuItem _enabled;
     readonly Icon _on = Draw(Color.White), _off = Draw(Color.Gray), _stuckIcon = Draw(Color.OrangeRed);
+    public static readonly Icon AppIcon = Draw(Color.White);
     string? _stuck;
+    SettingsWindow? _window;
 
     public Tray(Gestures gestures)
     {
@@ -61,17 +63,36 @@ sealed class Tray : ApplicationContext
         _enabled = new ToolStripMenuItem("Жесты включены") { Checked = true, CheckOnClick = true };
         _enabled.CheckedChanged += (_, _) => SetEnabled(_enabled.Checked);
         var menu = new ContextMenuStrip();
+        var settings = new ToolStripMenuItem("Настройки…", null, (_, _) => OpenSettings());
+        settings.Font = new Font(settings.Font, FontStyle.Bold);
+        menu.Items.Add(settings);
         menu.Items.Add(_enabled);
         menu.Items.Add("Открыть лог", null, (_, _) => Process.Start(new ProcessStartInfo(Log.Path) { UseShellExecute = true }));
         menu.Items.Add("Перезапустить", null, (_, _) => Restart());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Выйти", null, (_, _) => Quit());
         _icon = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
+        _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenSettings(); };
         Show();
 
         var timer = new System.Windows.Forms.Timer { Interval = 500 };
         timer.Tick += (_, _) => Watch();
         timer.Start();
+    }
+
+    void OpenSettings()
+    {
+        if (_window == null || _window.IsDisposed)
+        {
+            // From the window, through the menu item, so both stay in step.
+            _window = new SettingsWindow(_gestures, on => _enabled.Checked = on);
+            _window.Show();
+        }
+        else
+        {
+            if (_window.WindowState == FormWindowState.Minimized) _window.WindowState = FormWindowState.Normal;
+            _window.Activate();
+        }
     }
 
     void SetEnabled(bool on)
@@ -80,6 +101,7 @@ sealed class Tray : ApplicationContext
         if (!on) lock (_gestures.Sync) _gestures.Reset();
         Log.Write(on ? "gestures on" : "gestures off");
         Show();
+        if (_window is { IsDisposed: false }) _window.SendState();
     }
 
     // A thread busy on one item for too long is stuck: gestures off, say so.

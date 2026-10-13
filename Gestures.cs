@@ -6,12 +6,12 @@
 // whether it moved since; see ClickFingers. With two fingers resting, a click by a
 // third goes to Windows.
 //
-// Click with 3 fingers = middle button. Four or more fingers: nothing, left to Windows.
-// Click with 1 finger (a thumb, say) at an edge of the pad, by height:
-//                  left edge              right edge
-//   top third      next track             volume up a step; held, repeats like a key
-//   middle third   middle button (voice)  media play/pause
-//   bottom third   previous track         volume down, like volume up
+// What a click does comes from the settings (Settings.cs): a click with 3 or with 4
+// fingers, and a click with 1 finger (a thumb, say) in one of six edge zones — the left
+// or right strip of the pad, by thirds of its height. Each gets an action: the middle
+// button (held while the pad is), a media key, a volume step (repeating while held like
+// a held key), or nothing, left to Windows. With the Hold trigger the press is held back:
+// released before HoldMs it is replayed as the click it was, held longer it is the action.
 // Click with 2 fingers: Windows makes it a left press (one finger holds the click, the
 // other drags a selection) or a right click, and which one the user means is not known
 // at press time. So the press is held back and the fingers decide:
@@ -42,10 +42,6 @@ sealed class Gestures
     // An older finger that moved within this before the last landing was pointing,
     // not resting, and is counted in the click.
     const long PointingMs = 1500;
-    // The edge strips with the media clicks, each as a share of the pad's width (~32 mm).
-    const double EdgeWidth = 0.2;
-    // EdgeKey's answer for the right edge's middle: the middle button, not a key.
-    const ushort EdgeMiddle = 0;
     // Held top/bottom click: first repeat after this, then one step per RepeatMs.
     const int RepeatDelayMs = 350, RepeatMs = 60;
     // Finger travel, as a share of the pad's width, that counts as moving (~4 mm).
@@ -55,12 +51,18 @@ sealed class Gestures
     // Shell windows that keep their own clicks.
     static readonly HashSet<string> Unmovable = new() { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
 
-    enum Mode { None, Middle, Edge }
+    // Waiting: a Hold gesture pressed, not yet held long enough.
+    enum Mode { None, Waiting, Middle, Key }
     Mode _mode;
     Pad? _modePad;
+    string _slot = "";
+    GestureAction _action;
     bool _swallowing;
+    // The button Windows pressed for a Waiting gesture, once the hook has seen it.
+    bool _pressSeen, _pressRight;
+    readonly System.Threading.Timer _hold;
 
-    // Edge click: the volume key held, or 0 for any other.
+    // The volume key held, or 0.
     ushort _repeatKey;
     readonly System.Threading.Timer _repeat;
 
@@ -84,12 +86,18 @@ sealed class Gestures
             lock (Sync)
                 if (_repeatKey != 0 && Enabled) Effects.Key(_repeatKey);
         });
+        _hold = new System.Threading.Timer(_ =>
+        {
+            lock (Sync)
+                if (_mode == Mode.Waiting && Enabled) Begin();
+        });
     }
 
     // Drop whatever is in progress; for switching off.
     public void Reset()
     {
         _repeat.Change(Timeout.Infinite, Timeout.Infinite);
+        _hold.Change(Timeout.Infinite, Timeout.Infinite);
         if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
         _mode = Mode.None;
         _modePad = null;
@@ -109,16 +117,13 @@ sealed class Gestures
             pad.Button = button;
             return;
         }
-        if (button && !pad.Button && EdgeKey(pad) is ushort key)
+        if (button && !pad.Button && Find(pad) is string slot)
         {
-            StartEdge(pad, key);
+            Start(pad, slot);
         }
-        else if (button && !pad.Button && pad.Contacts >= 3)
+        else if (button && !pad.Button && pad.Contacts >= 3 && _mode == Mode.None)
         {
-            int fingers = ClickFingers(pad);
-            if (fingers == 3) StartMiddle(pad);
-            else if (_mode == Mode.None)
-                Log.Write($"{pad.Contacts} fingers, counted {fingers} (landed {pad.LandingsText} ms before the last), left to Windows");
+            Log.Write($"{pad.Contacts} fingers, counted {ClickFingers(pad)} (landed {pad.LandingsText} ms before the last), left to Windows");
         }
         else if (!button && pad.Button && pad == _modePad)
         {
@@ -144,14 +149,15 @@ sealed class Gestures
         if (_mode == Mode.None && DragMouse(msg, info)) return true;
         if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN)
         {
-            if (_modePad == null)
-            {
-                if (FreshPad(p => EdgeKey(p) != null) is Pad edge) StartEdge(edge, EdgeKey(edge)!.Value);
-                else if (FreshPad(p => p.Contacts >= 3 && ClickFingers(p) == 3) is Pad pad) StartMiddle(pad);
-            }
+            if (_modePad == null && FreshPad(p => Find(p) != null) is Pad pad) Start(pad, Find(pad)!);
             if (_modePad != null)
             {
                 _swallowing = true;
+                if (!_pressSeen)
+                {
+                    _pressSeen = true;
+                    _pressRight = msg == WM_RBUTTONDOWN;
+                }
                 return true;
             }
         }
@@ -164,7 +170,7 @@ sealed class Gestures
         return false;
     }
 
-    // ---- Three fingers.
+    // ---- One-finger edge clicks and three/four-finger clicks.
 
     // How many fingers a click is made with, by how they landed. The last fingers to
     // land within TogetherMs of each other are the fresh group:
@@ -187,68 +193,104 @@ sealed class Gestures
         return before.Length >= 2 && before[^2] <= SameMotionMs ? before.Length : 1;
     }
 
-    // The media key for a one-finger click at an edge (EdgeMiddle for the middle
-    // button), or null elsewhere.
-    static ushort? EdgeKey(Pad pad)
+    // The gesture slot a click on the pad would be, if its action is not left to Windows.
+    static string? Find(Pad pad)
     {
-        if (pad.Contacts != 1 || pad.YFingers != 1) return null;
+        var config = Settings.Current;
+        string? slot = pad.Contacts == 1 ? EdgeSlot(pad, config)
+            : pad.Contacts >= 3 ? ClickFingers(pad) switch { 3 => "three", 4 => "four", _ => null }
+            : null;
+        return slot != null && config.For(slot).Action != GestureAction.Windows ? slot : null;
+    }
+
+    // The edge zone under a single finger, or null away from the edges.
+    public static string? EdgeSlot(Pad pad, Config config)
+    {
+        if (pad.YFingers != 1) return null;
         double x = (pad.Xs[0] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
-        bool left = x <= EdgeWidth;
-        if (!left && x < 1 - EdgeWidth) return null;
+        double edge = config.EdgeWidth / 100.0;
+        string side = x <= edge ? "left" : x >= 1 - edge ? "right" : "";
+        if (side == "") return null;
         // Y grows downward.
         double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
-        int third = y < 1.0 / 3 ? 0 : y > 2.0 / 3 ? 2 : 1;
-        return left
-            ? third switch { 0 => VK_MEDIA_NEXT_TRACK, 1 => EdgeMiddle, _ => VK_MEDIA_PREV_TRACK }
-            : third switch { 0 => VK_VOLUME_UP, 1 => VK_MEDIA_PLAY_PAUSE, _ => VK_VOLUME_DOWN };
+        return side + (y < 1.0 / 3 ? "-top" : y > 2.0 / 3 ? "-bottom" : "-middle");
     }
 
-    void StartMiddle(Pad pad)
+    void Start(Pad pad, string slot)
     {
         if (_mode != Mode.None) return;
-        _mode = Mode.Middle;
+        var binding = Settings.Current.For(slot);
         _modePad = pad;
-        Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
-        Log.Write($"middle (3 fingers, landed {pad.LandingsText} ms before the last)");
+        _slot = slot;
+        _action = binding.Action;
+        _pressSeen = false;
+        if (binding.Trigger == Trigger.Hold)
+        {
+            _mode = Mode.Waiting;
+            _hold.Change(Settings.Current.HoldMs, Timeout.Infinite);
+        }
+        else Begin();
     }
 
-    // A track key or play/pause goes at once; a volume step repeats while held; the
-    // middle button is held while the pad is.
-    void StartEdge(Pad pad, ushort key)
+    // The action itself. A media key goes at once; a volume step repeats while held;
+    // the middle button is held while the pad is.
+    void Begin()
     {
-        if (_mode != Mode.None) return;
-        _modePad = pad;
-        if (key == EdgeMiddle)
+        string fingers = _slot is "three" or "four" ? $" (landed {_modePad?.LandingsText} ms before the last)" : "";
+        Log.Write($"{_slot}: {_action}{fingers}");
+        if (_action == GestureAction.MiddleClick)
         {
             _mode = Mode.Middle;
             Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
-            Log.Write("edge: middle");
             return;
         }
-        _mode = Mode.Edge;
+        _mode = Mode.Key;
+        ushort key = _action switch
+        {
+            GestureAction.PlayPause => VK_MEDIA_PLAY_PAUSE,
+            GestureAction.NextTrack => VK_MEDIA_NEXT_TRACK,
+            GestureAction.PrevTrack => VK_MEDIA_PREV_TRACK,
+            GestureAction.VolumeUp => VK_VOLUME_UP,
+            GestureAction.VolumeDown => VK_VOLUME_DOWN,
+            _ => VK_VOLUME_MUTE,
+        };
         Effects.Key(key);
         if (key is VK_VOLUME_UP or VK_VOLUME_DOWN)
         {
             _repeatKey = key;
             _repeat.Change(RepeatDelayMs, RepeatMs);
         }
-        Log.Write(key switch
-        {
-            VK_VOLUME_UP => "edge: volume up",
-            VK_VOLUME_DOWN => "edge: volume down",
-            VK_MEDIA_NEXT_TRACK => "edge: next track",
-            VK_MEDIA_PREV_TRACK => "edge: previous track",
-            _ => "edge: play/pause",
-        });
     }
 
     void End()
     {
+        if (_mode == Mode.Waiting)
+        {
+            // Let go before HoldMs: an ordinary click.
+            _hold.Change(Timeout.Infinite, Timeout.Infinite);
+            if (_pressSeen) Effects.Click(_pressRight);
+            Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
+        }
         if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
         _repeat.Change(Timeout.Infinite, Timeout.Infinite);
         _repeatKey = 0;
         _mode = Mode.None;
         _modePad = null;
+    }
+
+    // ---- For the settings window: the pad touched last, its fingers, and the gesture
+    // pressed on it.
+    public Live? Snapshot()
+    {
+        var pad = Pads.Where(p => p.XMax > 0).MaxBy(p => p.LastReport);
+        if (pad == null) return null;
+        double w = Math.Max(1, pad.XMax - pad.XMin), h = Math.Max(1, pad.YMax - pad.YMin);
+        var fingers = new double[pad.Contacts > 0 ? Math.Min(pad.YFingers, Pad.MaxFingers) : 0][];
+        for (int i = 0; i < fingers.Length; i++)
+            fingers[i] = new[] { (pad.Xs[i] - pad.XMin) / w, (pad.Ys[i] - pad.YMin) / h };
+        string? active = pad == _modePad ? _slot : null;
+        return new Live(w / h, fingers, pad.Button, active, _mode == Mode.Waiting,
+            pad.Contacts == 1 ? EdgeSlot(pad, Settings.Current) : null);
     }
 
     // ---- Two fingers.
@@ -390,3 +432,8 @@ sealed class Gestures
         return !Unmovable.Contains(name.ToString());
     }
 }
+
+// One frame of the live view: pad width/height, fingers as 0..1 positions, whether it is
+// pressed, the gesture slot pressed (Waiting: still within its hold), the zone under a
+// lone finger.
+sealed record Live(double Aspect, double[][] Fingers, bool Pressed, string? Active, bool Waiting, string? Under);

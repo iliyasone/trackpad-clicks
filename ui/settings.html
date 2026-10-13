@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>TrackpadClicks</title>
+<style>
+  :root {
+    --bg: #f5f5f7; --panel: #ffffff; --panel-2: #f0f0f3; --text: #1d1d1f; --muted: #6e6e73;
+    --line: rgba(0,0,0,.08); --pad: linear-gradient(160deg, #fbfbfd, #e9e9ee); --pad-edge: rgba(0,0,0,.10);
+    --zone: rgba(0,0,0,.035); --accent: #0a84ff; --accent-soft: rgba(10,132,255,.14); --finger: rgba(10,132,255,.85);
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 12px 40px rgba(0,0,0,.08);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1e; --panel: #2c2c2e; --panel-2: #3a3a3c; --text: #f5f5f7; --muted: #98989d;
+      --line: rgba(255,255,255,.08); --pad: linear-gradient(160deg, #3a3a3d, #2a2a2d); --pad-edge: rgba(255,255,255,.08);
+      --zone: rgba(255,255,255,.035); --accent: #0a84ff; --accent-soft: rgba(10,132,255,.22); --finger: rgba(100,170,255,.9);
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 16px 48px rgba(0,0,0,.35);
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+    font: 14px/1.4 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif; user-select: none; }
+  button { font: inherit; color: inherit; }
+  svg { display: block; }
+
+  .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+  header { display: flex; align-items: center; gap: 14px; padding: 18px 28px 6px; }
+  header .logo { width: 34px; height: 24px; border-radius: 7px; background: var(--pad); border: 1.5px solid var(--pad-edge); }
+  header h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  header .grow { flex: 1; }
+
+  .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--muted); }
+  .switch .track { width: 42px; height: 26px; border-radius: 13px; background: var(--panel-2); position: relative; transition: background .2s; }
+  .switch .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%;
+    background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.3); transition: transform .2s; }
+  .switch.on .track { background: #34c759; }
+  .switch.on .track::after { transform: translateX(16px); }
+  .switch.on { color: var(--text); }
+
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 24px; padding: 14px 28px 24px; min-height: 0; }
+  .stage { display: flex; flex-direction: column; gap: 18px; min-height: 0; justify-content: center; }
+
+  .pad-wrap { flex: 0 1 auto; min-height: 0; display: flex; align-items: center; justify-content: center; }
+  .pad { position: relative; width: 100%; max-height: 100%; aspect-ratio: 1.503; border-radius: 22px; background: var(--pad);
+    border: 1.5px solid var(--pad-edge); box-shadow: var(--shadow); overflow: hidden; }
+  .center-hint { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; text-align: center; pointer-events: none; }
+  .center-hint b { display: block; font-weight: 600; color: var(--text); opacity: .55; font-size: 15px; margin-bottom: 2px; }
+
+  .strip { position: absolute; top: 0; bottom: 0; display: grid; grid-template-rows: 1fr 1fr 1fr; transition: width .15s; }
+  .strip.left { left: 0; border-right: 1px dashed var(--line); }
+  .strip.right { right: 0; border-left: 1px dashed var(--line); }
+  .zone { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+    border: 0; background: var(--zone); cursor: pointer; padding: 6px; text-align: center; transition: background .15s; overflow: hidden; }
+  .zone + .zone { border-top: 1px dashed var(--line); }
+  .zone:hover { background: var(--accent-soft); }
+  .zone .icon { width: 26px; height: 26px; opacity: .8; }
+  .zone .name { font-size: 12px; line-height: 1.2; color: var(--muted); }
+  .zone.off .icon { opacity: .25; }
+  .zone .badge, .card .badge { position: absolute; top: 7px; right: 7px; font-size: 10px; padding: 1px 6px; border-radius: 6px;
+    background: var(--panel-2); color: var(--muted); }
+  .zone.selected, .card.selected { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-soft); }
+  .zone.selected .name, .card.selected .name { color: var(--text); }
+  .zone.under { background: var(--accent-soft); }
+  .zone.active, .card.active { background: var(--accent); }
+  .zone.active .name, .zone.active .icon, .card.active .name, .card.active .icon { color: #fff; opacity: 1; }
+  .zone .fill, .card .fill { position: absolute; left: 0; bottom: 0; height: 3px; width: 0; background: var(--accent); }
+  .zone.waiting .fill, .card.waiting .fill { animation: fill var(--hold) linear forwards; }
+  @keyframes fill { to { width: 100%; } }
+
+  .finger { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; pointer-events: none;
+    background: radial-gradient(circle at 40% 35%, rgba(255,255,255,.55), transparent 55%), var(--finger);
+    box-shadow: 0 0 0 6px var(--accent-soft); transition: transform .08s; }
+  .pad.pressed .finger { transform: scale(.82); box-shadow: 0 0 0 10px var(--accent-soft); }
+
+  .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .card { position: relative; display: flex; align-items: center; gap: 14px; padding: 14px 16px; border-radius: 14px; border: 0;
+    background: var(--panel); box-shadow: var(--shadow); cursor: pointer; text-align: left; overflow: hidden; transition: background .15s; }
+  .card:hover { background: var(--accent-soft); }
+  .card .dots { display: flex; gap: 4px; }
+  .card .dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--finger); }
+  .card .title { font-weight: 600; }
+  .card .name { color: var(--muted); font-size: 13px; }
+  .card .icon { width: 22px; height: 22px; margin-left: auto; opacity: .7; }
+
+  aside { background: var(--panel); border-radius: 18px; box-shadow: var(--shadow); padding: 20px; display: flex; flex-direction: column;
+    gap: 14px; overflow-y: auto; min-height: 0; }
+  aside h2 { margin: 0; font-size: 17px; font-weight: 600; }
+  aside .what { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .label { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .action { display: flex; align-items: center; gap: 9px; padding: 8px 10px; border-radius: 10px; border: 0; background: var(--panel-2);
+    cursor: pointer; text-align: left; font-size: 13px; transition: background .12s, box-shadow .12s; }
+  .action:hover { box-shadow: inset 0 0 0 1px var(--accent); }
+  .action.on { background: var(--accent); color: #fff; }
+  .action svg { width: 20px; height: 20px; flex: none; }
+  .segment { display: grid; grid-template-columns: 1fr 1fr; background: var(--panel-2); border-radius: 10px; padding: 3px; }
+  .segment button { border: 0; background: none; padding: 7px; border-radius: 8px; cursor: pointer; }
+  .segment button.on { background: var(--panel); box-shadow: 0 1px 3px rgba(0,0,0,.15); font-weight: 600; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .slider { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; align-items: center; }
+  .slider output { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 13px; }
+  .slider input { grid-column: 1 / -1; width: 100%; accent-color: var(--accent); }
+  .divider { height: 1px; background: var(--line); }
+  .foot { margin-top: auto; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12.5px; }
+  .foot button { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
+  .saved { opacity: 0; transition: opacity .3s; }
+  .saved.show { opacity: 1; }
+  .disabled .pad, .disabled .cards { opacity: .45; filter: grayscale(.6); }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <header>
+    <div class="logo"></div>
+    <div>
+      <h1>TrackpadClicks</h1>
+      <div class="sub">Нажми на зону или карточку, чтобы выбрать, что делает клик</div>
+    </div>
+    <div class="grow"></div>
+    <div class="switch on" id="enabled"><span>Жесты включены</span><div class="track"></div></div>
+  </header>
+  <main>
+    <section class="stage">
+      <div class="pad-wrap">
+        <div class="pad" id="pad">
+          <div class="center-hint"><div><b>Обычные клики</b>здесь всё как в Windows</div></div>
+          <div class="strip left" id="left"></div>
+          <div class="strip right" id="right"></div>
+        </div>
+      </div>
+      <div class="cards" id="cards"></div>
+    </section>
+    <aside>
+      <div>
+        <h2 id="title"></h2>
+        <div class="what" id="what"></div>
+      </div>
+      <div>
+        <div class="label">Действие</div>
+        <div class="actions" id="actions"></div>
+      </div>
+      <div id="trigger-box">
+        <div class="label">Срабатывает</div>
+        <div class="segment" id="trigger">
+          <button data-trigger="click">Сразу по клику</button>
+          <button data-trigger="hold">По удержанию</button>
+        </div>
+        <div class="hint" id="trigger-hint"></div>
+      </div>
+      <div class="divider"></div>
+      <div class="slider">
+        <span>Ширина краёв</span><output id="edge-out"></output>
+        <input type="range" id="edge" min="8" max="35" step="1">
+      </div>
+      <div class="slider">
+        <span>Время удержания</span><output id="hold-out"></output>
+        <input type="range" id="hold" min="200" max="1200" step="50">
+      </div>
+      <div class="foot">
+        <button id="log">Открыть лог</button>
+        <span class="saved" id="saved">Сохранено ✓</span>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<script>
+const speaker = '<path d="M4 9h3l5-4v14l-5-4H4z" fill="currentColor" stroke="none"/>';
+const ICONS = {
+  windows: '<path d="M6 3l12 9-5.5 1.2L15.5 20l-2.6 1.2-3-6.8L6 18z" fill="currentColor" stroke="none"/>',
+  middleClick: '<rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 6.5v4" stroke-width="3"/>',
+  playPause: '<path d="M4 5l8 7-8 7z" fill="currentColor" stroke="none"/><path d="M15.5 5.5v13M20 5.5v13" stroke-width="2.6"/>',
+  nextTrack: '<path d="M4 5l8 7-8 7zM11 5l8 7-8 7z" fill="currentColor" stroke="none"/><path d="M20.5 5v14" stroke-width="2.2"/>',
+  prevTrack: '<path d="M20 5l-8 7 8 7zM13 5l-8 7 8 7z" fill="currentColor" stroke="none"/><path d="M3.5 5v14" stroke-width="2.2"/>',
+  volumeUp: speaker + '<path d="M15.5 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11"/>',
+  volumeDown: speaker + '<path d="M15.5 9a4 4 0 010 6"/>',
+  mute: speaker + '<path d="M16 9.5l5 5M21 9.5l-5 5"/>',
+};
+const NAMES = {
+  windows: 'Как обычно', middleClick: 'Средний клик', playPause: 'Плей / пауза', nextTrack: 'Следующий трек',
+  prevTrack: 'Предыдущий трек', volumeUp: 'Громче', volumeDown: 'Тише', mute: 'Без звука',
+};
+const SLOTS = {
+  'left-top': ['Левый край, сверху', 'Клик одним пальцем'], 'left-middle': ['Левый край, посередине', 'Клик одним пальцем'],
+  'left-bottom': ['Левый край, снизу', 'Клик одним пальцем'], 'right-top': ['Правый край, сверху', 'Клик одним пальцем'],
+  'right-middle': ['Правый край, посередине', 'Клик одним пальцем'], 'right-bottom': ['Правый край, снизу', 'Клик одним пальцем'],
+  three: ['Три пальца', 'Клик тремя пальцами в любом месте'], four: ['Четыре пальца', 'Клик четырьмя пальцами в любом месте'],
+};
+const icon = a => `<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[a]}</svg>`;
+const $ = id => document.getElementById(id);
+
+const host = window.chrome && window.chrome.webview;
+const send = msg => host && host.postMessage(msg);
+
+let config = null, enabled = true, selected = 'right-middle';
+
+function render() {
+  if (!config) return;
+  const pad = $('pad');
+  $('left').style.width = $('right').style.width = config.edgeWidth + '%';
+  pad.style.setProperty('--hold', config.holdMs + 'ms');
+  for (const side of ['left', 'right']) {
+    $(side).innerHTML = ['top', 'middle', 'bottom'].map(h => zoneHtml(`${side}-${h}`)).join('');
+  }
+  $('cards').innerHTML = ['three', 'four'].map(slot => {
+    const b = config.gestures[slot], n = slot === 'three' ? 3 : 4;
+    return `<button class="card ${slot === selected ? 'selected' : ''}" data-slot="${slot}">
+      <span class="dots">${'<i></i>'.repeat(n)}</span>
+      <span><div class="title">${SLOTS[slot][0]}</div><div class="name">${b.action === 'windows' ? 'Оставить Windows' : NAMES[b.action]}</div></span>
+      ${icon(b.action)}${b.trigger === 'hold' && b.action !== 'windows' ? '<span class="badge">удержание</span>' : ''}<span class="fill"></span></button>`;
+  }).join('');
+
+  const b = config.gestures[selected];
+  $('title').textContent = SLOTS[selected][0];
+  $('what').textContent = SLOTS[selected][1];
+  $('actions').innerHTML = Object.keys(NAMES).map(a =>
+    `<button class="action ${a === b.action ? 'on' : ''}" data-action="${a}">${icon(a)}<span>${a === 'windows' && selected === 'four' ? 'Оставить Windows' : NAMES[a]}</span></button>`).join('');
+  $('trigger-box').style.display = b.action === 'windows' ? 'none' : '';
+  for (const t of $('trigger').children) t.classList.toggle('on', t.dataset.trigger === b.trigger);
+  $('trigger-hint').textContent = b.trigger === 'hold'
+    ? `Короткий клик остаётся обычным кликом. Действие — если подержать нажатым ${config.holdMs} мс.`
+    : 'Действие сразу при нажатии; обычного клика в этой зоне нет.';
+  $('edge').value = config.edgeWidth; $('edge-out').textContent = config.edgeWidth + '%';
+  $('hold').value = config.holdMs; $('hold-out').textContent = config.holdMs + ' мс';
+  $('enabled').classList.toggle('on', enabled);
+  $('app').classList.toggle('disabled', !enabled);
+  paintLive();
+}
+
+function zoneHtml(slot) {
+  const b = config.gestures[slot];
+  const off = b.action === 'windows';
+  return `<button class="zone ${off ? 'off' : ''} ${slot === selected ? 'selected' : ''}" data-slot="${slot}">
+    ${icon(b.action)}<span class="name">${off ? 'Обычный клик' : NAMES[b.action]}</span>
+    ${b.trigger === 'hold' && !off ? '<span class="badge">удерж.</span>' : ''}<span class="fill"></span></button>`;
+}
+
+let flash;
+function saved() {
+  $('saved').classList.add('show');
+  clearTimeout(flash);
+  flash = setTimeout(() => $('saved').classList.remove('show'), 1400);
+}
+
+function change(mutate) {
+  mutate();
+  render();
+  send({ type: 'config', config });
+  saved();
+}
+
+document.addEventListener('click', e => {
+  const slot = e.target.closest('[data-slot]');
+  if (slot) { selected = slot.dataset.slot; render(); return; }
+  const action = e.target.closest('[data-action]');
+  if (action) return change(() => config.gestures[selected].action = action.dataset.action);
+  const trigger = e.target.closest('[data-trigger]');
+  if (trigger) return change(() => config.gestures[selected].trigger = trigger.dataset.trigger);
+});
+$('enabled').onclick = () => { enabled = !enabled; render(); send({ type: 'enabled', value: enabled }); };
+$('log').onclick = () => send({ type: 'log' });
+$('edge').oninput = e => { config.edgeWidth = +e.target.value; render(); };
+$('hold').oninput = e => { config.holdMs = +e.target.value; render(); };
+$('edge').onchange = $('hold').onchange = () => change(() => {});
+
+// ---- Live fingers.
+let live = null;
+function paintLive() {
+  const pad = $('pad');
+  if (!live) return;
+  if (Math.abs(live.aspect - parseFloat(pad.style.aspectRatio || 1.503)) > .01) pad.style.aspectRatio = live.aspect;
+  pad.classList.toggle('pressed', live.pressed);
+  const dots = pad.querySelectorAll('.finger');
+  for (let i = dots.length; i < live.fingers.length; i++) pad.insertAdjacentHTML('beforeend', '<div class="finger"></div>');
+  pad.querySelectorAll('.finger').forEach((d, i) => {
+    const f = live.fingers[i];
+    d.style.display = f ? '' : 'none';
+    if (f) { d.style.left = f[0] * 100 + '%'; d.style.top = f[1] * 100 + '%'; }
+  });
+  document.querySelectorAll('[data-slot]').forEach(z => {
+    const s = z.dataset.slot, active = s === live.active;
+    z.classList.toggle('under', s === live.under && !active);
+    z.classList.toggle('active', active && !live.waiting);
+    if (z.classList.contains('waiting') !== (active && live.waiting)) z.classList.toggle('waiting');
+  });
+}
+
+if (host) {
+  host.addEventListener('message', e => {
+    const m = e.data;
+    if (m.type === 'state') { config = m.config; enabled = m.enabled; render(); }
+    else if (m.type === 'live') { live = m; paintLive(); }
+  });
+  send({ type: 'ready' });
+} else {
+  // Opened in a plain browser: a demo with a finger walking along the right edge.
+  config = { edgeWidth: 20, holdMs: 400, gestures: {
+    'left-top': { action: 'nextTrack', trigger: 'click' }, 'left-middle': { action: 'middleClick', trigger: 'hold' },
+    'left-bottom': { action: 'prevTrack', trigger: 'click' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
+    'right-middle': { action: 'playPause', trigger: 'click' }, 'right-bottom': { action: 'volumeDown', trigger: 'click' },
+    three: { action: 'middleClick', trigger: 'click' }, four: { action: 'windows', trigger: 'click' } } };
+  render();
+  let t = 0;
+  setInterval(() => {
+    t += 0.02;
+    const y = 0.5 + 0.42 * Math.sin(t);
+    const under = 'right-' + (y < 1 / 3 ? 'top' : y > 2 / 3 ? 'bottom' : 'middle');
+    const pressed = Math.sin(t * 3) > 0.9;
+    live = { aspect: 1.503, fingers: [[0.9, y], [0.45, 0.6]], pressed, active: pressed ? under : null, waiting: false, under };
+    paintLive();
+  }, 33);
+}
+</script>
+</body>
+</html>
