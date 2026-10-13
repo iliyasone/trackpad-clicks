@@ -10,6 +10,8 @@ sealed class RawInput : NativeWindow
     // When the thread started on the current message, 0 when idle; watched by the tray.
     public static long BusySince;
     public static volatile string At = "idle";
+    // Keep each report's bytes on its pad, for the settings window's test.
+    public static volatile bool Capture;
 
     readonly Gestures _gestures;
     readonly Dictionary<IntPtr, Pad?> _pads = new();
@@ -76,10 +78,17 @@ sealed class RawInput : NativeWindow
                 if (!Parse(pad, report, reportSize, out var frame)) continue;
                 if (_debug && frame.Button != pad.Button)
                     Log.Write($"dev {header.Device} {(frame.Button ? "down" : "up")} {frame.Contacts} fingers, landed {pad.LandingsText} ms before the last");
+                byte[]? raw = null;
+                if (Capture)
+                {
+                    raw = new byte[reportSize];
+                    Marshal.Copy(report, raw, 0, (int)reportSize);
+                }
                 At = "gestures";
                 lock (_gestures.Sync)
                 {
                     pad.Apply(frame);
+                    pad.Raw = raw;
                     _gestures.OnReport(pad, frame.Button);
                 }
             }
@@ -92,7 +101,7 @@ sealed class RawInput : NativeWindow
     // leftover memory, sometimes with the tip switch set, so only those slots are read.
     bool Parse(Pad pad, IntPtr report, uint length, out Frame frame)
     {
-        frame = new Frame { Ids = new uint[Pad.MaxFingers], Xs = new double[Pad.MaxFingers], Ys = new double[Pad.MaxFingers] };
+        frame = new Frame { Ids = new uint[Pad.MaxFingers], Xs = new double[Pad.MaxFingers], Ys = new double[Pad.MaxFingers], Pressures = new int[Pad.MaxFingers] };
         int status = HidP_GetUsageValue(HidP_Input, 0x0D, 0, 0x54, out uint contacts, pad.Preparsed, report, length);
         if (status != HIDP_STATUS_SUCCESS)
         {
@@ -125,6 +134,9 @@ sealed class RawInput : NativeWindow
                 frame.Ids[fingers] = id;
                 frame.Xs[fingers] = x;
                 frame.Ys[fingers] = y;
+                // Per-finger pressure, 0..255: Magic Trackpad driver 2.2 and later; -1 without it.
+                frame.Pressures[fingers] = HidP_GetUsageValue(HidP_Input, 0x0D, link, 0x30, out uint pressure, pad.Preparsed, report, length) == HIDP_STATUS_SUCCESS
+                    ? (int)pressure : -1;
             }
             sumX += x;
             sumY += y;

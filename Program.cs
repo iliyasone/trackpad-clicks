@@ -5,7 +5,7 @@
 //   mouse hook  — decides swallow/pass from memory only (MouseHook.cs);
 //   raw input   — reads the touchpads' HID reports (RawInput.cs);
 //   effects     — SendInput, volume, window moves, the log (Effects.cs);
-//   UI          — the tray icon, and the watch over the other two.
+//   UI          — the tray icon, the settings window, and the watch over the other two.
 // Every mouse event in the system waits for the hook, so a call that hangs must never
 // run on it. A stuck raw input or effects thread only switches gestures off, shown in
 // the tray.
@@ -20,6 +20,14 @@ static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        // A trackpadclicks://update link: apply the staged update, whether or not a copy runs.
+        if (args.Length == 2 && args[0] == "--url")
+        {
+            if (args[1].StartsWith($"{Updater.Scheme}://update", StringComparison.OrdinalIgnoreCase) && Updater.Apply() is string error)
+                MessageBox.Show(error, "TrackpadClicks", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            return;
+        }
+
         // One instance. Not a mutex: a copy wedged in the kernel keeps its mutex but
         // reports HasExited, and must not block its replacement.
         int replacing = args.Length == 2 && args[0] == "--replace" ? int.Parse(args[1]) : 0;
@@ -36,7 +44,9 @@ static class Program
         // Hook coordinates and window rects must both be physical pixels.
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
         Application.EnableVisualStyles();
-        Log.WriteNow("start");
+        Log.WriteNow($"start {Updater.Current}");
+        Updater.Register();
+        Updater.Clean();
         Worker.Start();
         var gestures = new Gestures();
         RawInput.Start(gestures);
@@ -53,7 +63,13 @@ sealed class Tray : ApplicationContext
     readonly NotifyIcon _icon;
     readonly ToolStripMenuItem _enabled;
     readonly Icon _on = Draw(Color.White), _off = Draw(Color.Gray), _stuckIcon = Draw(Color.OrangeRed);
+    public static readonly Icon AppIcon = Draw(Color.White);
     string? _stuck;
+    SettingsWindow? _window;
+    // Shown while an update is staged; see Updater.
+    readonly ToolStripMenuItem _update;
+    string? _updateShown;
+    int _ticks;
 
     public Tray(Gestures gestures)
     {
@@ -61,17 +77,62 @@ sealed class Tray : ApplicationContext
         _enabled = new ToolStripMenuItem("Жесты включены") { Checked = true, CheckOnClick = true };
         _enabled.CheckedChanged += (_, _) => SetEnabled(_enabled.Checked);
         var menu = new ContextMenuStrip();
+        var settings = new ToolStripMenuItem("Настройки…", null, (_, _) => OpenSettings());
+        settings.Font = new Font(settings.Font, FontStyle.Bold);
+        _update = new ToolStripMenuItem("", null, (_, _) => InstallUpdate()) { Visible = false };
+        menu.Items.Add(_update);
+        menu.Items.Add(settings);
         menu.Items.Add(_enabled);
         menu.Items.Add("Открыть лог", null, (_, _) => Process.Start(new ProcessStartInfo(Log.Path) { UseShellExecute = true }));
         menu.Items.Add("Перезапустить", null, (_, _) => Restart());
         menu.Items.Add(new ToolStripSeparator());
         menu.Items.Add("Выйти", null, (_, _) => Quit());
         _icon = new NotifyIcon { ContextMenuStrip = menu, Visible = true };
+        _icon.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) OpenSettings(); };
         Show();
 
         var timer = new System.Windows.Forms.Timer { Interval = 500 };
-        timer.Tick += (_, _) => Watch();
+        timer.Tick += (_, _) =>
+        {
+            Watch();
+            if (_ticks++ % 10 == 0) CheckUpdate();
+        };
         timer.Start();
+    }
+
+    // Every 5 s: say once that an update is staged, and keep the menu item in step.
+    void CheckUpdate()
+    {
+        var pending = Updater.Check();
+        _update.Visible = pending != null;
+        if (pending == null) return;
+        _update.Text = $"Установить обновление {pending.Version}";
+        if (_updateShown == pending.Version) return;
+        _updateShown = pending.Version;
+        _icon.ShowBalloonTip(10000, $"TrackpadClicks {pending.Version} готов",
+            "Установи, когда удобно: в меню значка или в окне настроек.", ToolTipIcon.Info);
+        if (_window is { IsDisposed: false }) _window.SendState();
+    }
+
+    public void InstallUpdate()
+    {
+        if (Updater.Apply() is string error)
+            MessageBox.Show(error, "TrackpadClicks", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+    }
+
+    void OpenSettings()
+    {
+        if (_window == null || _window.IsDisposed)
+        {
+            // From the window, through the menu item, so both stay in step.
+            _window = new SettingsWindow(_gestures, on => _enabled.Checked = on, InstallUpdate);
+            _window.Show();
+        }
+        else
+        {
+            if (_window.WindowState == FormWindowState.Minimized) _window.WindowState = FormWindowState.Normal;
+            _window.Activate();
+        }
     }
 
     void SetEnabled(bool on)
@@ -80,6 +141,7 @@ sealed class Tray : ApplicationContext
         if (!on) lock (_gestures.Sync) _gestures.Reset();
         Log.Write(on ? "gestures on" : "gestures off");
         Show();
+        if (_window is { IsDisposed: false }) _window.SendState();
     }
 
     // A thread busy on one item for too long is stuck: gestures off, say so.

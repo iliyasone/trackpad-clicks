@@ -20,8 +20,12 @@ sealed class Pad
     // The same fingers one by one: contact ID and position.
     public readonly uint[] Ids = new uint[MaxFingers];
     public readonly double[] Xs = new double[MaxFingers], Ys = new double[MaxFingers];
+    // Each finger's pressure, 0..255, or -1 when the driver doesn't report it.
+    public readonly int[] Pressures = new int[MaxFingers];
     // When each finger now touching landed, by contact ID.
     public readonly Dictionary<uint, long> Landed = new();
+    // The last report's bytes, kept only while the settings window's test is on.
+    public byte[]? Raw;
     // Where each finger was when it last moved, and when that was (0: not since landing).
     readonly Dictionary<uint, (double X, double Y, long At)> _moved = new();
     readonly List<uint> _lifted = new();
@@ -40,6 +44,7 @@ sealed class Pad
         Array.Copy(frame.Ids, Ids, MaxFingers);
         Array.Copy(frame.Xs, Xs, MaxFingers);
         Array.Copy(frame.Ys, Ys, MaxFingers);
+        Array.Copy(frame.Pressures, Pressures, MaxFingers);
 
         // Some reports carry the contact count without readable fingers: forget only
         // fingers missing from a report that has them all.
@@ -95,4 +100,5 @@ struct Frame
     public int Fingers;
     public uint[] Ids;
     public double[] Xs, Ys;
+    public int[] Pressures;
 }

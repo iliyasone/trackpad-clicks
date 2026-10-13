@@ -6,17 +6,26 @@
 // whether it moved since; see ClickFingers. With two fingers resting, a click by a
 // third goes to Windows.
 //
-// Click with 3 fingers = middle button. Four or more fingers: nothing, left to Windows.
-// Click with 1 finger at the right edge of the pad, by height:
-//   top third    = volume up a step; held, it repeats like a held key;
-//   middle third = media play/pause;
-//   bottom third = volume down, like the top.
+// What a click does comes from the settings (Settings.cs): a click with 3 or with 4
+// fingers, and a click with 1 finger (a thumb, say) in one of six edge zones — the left
+// or right strip of the pad, by thirds of its height. Each gets an action: the middle
+// button or mouse button 5 (held while the pad is; after a Hold trigger, for at least
+// MinHeldMs, so an app never takes a held gesture for a short tap), a media key, a volume step (repeating while held like
+// a held key), or nothing, left to Windows. With the Hold trigger the press is held back:
+// released before HoldMs it is replayed as the click it was, held longer it is the action.
+//
+// Second press: while an edge zone holds a mouse button, the pad's one button is
+// already down, so another finger pressing gives no new click. With driver 2.2+ each
+// finger reports its pressure: another finger pressing past PressForce presses the left
+// button (two fingers: the right one) until it eases off to 60% of that.
 // Click with 2 fingers: Windows makes it a left press (one finger holds the click, the
 // other drags a selection) or a right click, and which one the user means is not known
 // at press time. So the press is held back and the fingers decide:
 //   both fingers travel        -> drag the window under the cursor, from any point of it;
 //   one travels, one stays     -> the press is replayed, a normal selection;
-//   released without travel    -> the press is replayed as the click it was.
+//   released without travel    -> a click: right when both fingers came down together
+//                                 (Windows makes two fingers far apart a left click, as
+//                                 if one were a resting thumb), else the one Windows made.
 // The left/right press Windows makes for these clicks is swallowed by the hook.
 
 using static TrackpadClicks.Native;
@@ -41,8 +50,6 @@ sealed class Gestures
     // An older finger that moved within this before the last landing was pointing,
     // not resting, and is counted in the click.
     const long PointingMs = 1500;
-    // The right edge strip with the media clicks, as a share of the pad's width (~19 mm).
-    const double EdgeWidth = 0.12;
     // Held top/bottom click: first repeat after this, then one step per RepeatMs.
     const int RepeatDelayMs = 350, RepeatMs = 60;
     // Finger travel, as a share of the pad's width, that counts as moving (~4 mm).
@@ -52,12 +59,34 @@ sealed class Gestures
     // Shell windows that keep their own clicks.
     static readonly HashSet<string> Unmovable = new() { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
 
-    enum Mode { None, Middle, Edge }
+    // Waiting: a Hold gesture pressed, not yet held long enough. Button: a mouse button held.
+    enum Mode { None, Waiting, Button, Key }
     Mode _mode;
     Pad? _modePad;
+    string _slot = "";
+    GestureAction _action;
     bool _swallowing;
+    // The button Windows pressed for a Waiting gesture, once the hook has seen it.
+    bool _pressSeen, _pressRight;
+    readonly System.Threading.Timer _hold;
 
-    // Edge click: the volume key held, or 0 for play/pause.
+    // Second press: the finger holding the edge, the button pressed by others (0 none,
+    // 1 left, 2 right), and since when one finger presses (to wait for a second one).
+    uint _holdFinger;
+    int _second;
+    long _secondSince;
+    const long SecondPairMs = 60;
+
+    // The mouse button a Button gesture holds, when it went down, and whether its up is
+    // put off to MinHeldMs. Ciao takes a press under 0.35 s for a tap that starts
+    // hands-free dictation; a gesture that needed a hold must never look like one.
+    uint _buttonDown, _buttonUp, _buttonData;
+    long _buttonAt;
+    bool _buttonHeld, _upPending;
+    readonly System.Threading.Timer _buttonRelease;
+    const long MinHeldMs = 450;
+
+    // The volume key held, or 0.
     ushort _repeatKey;
     readonly System.Threading.Timer _repeat;
 
@@ -66,6 +95,8 @@ sealed class Gestures
     Pad? _dragPad;
     bool _dragPadPressed;
     bool _dragRight;
+    // The click a press released in place becomes; see the comment at the top.
+    bool _clickRight;
     bool _upSeen, _swallowUp;
     POINT _dragFrom;
     long _dragStart;
@@ -81,13 +112,34 @@ sealed class Gestures
             lock (Sync)
                 if (_repeatKey != 0 && Enabled) Effects.Key(_repeatKey);
         });
+        _buttonRelease = new System.Threading.Timer(_ =>
+        {
+            lock (Sync)
+                if (_upPending)
+                {
+                    _upPending = false;
+                    Effects.Mouse(_buttonUp, _buttonData);
+                }
+        });
+        _hold = new System.Threading.Timer(_ =>
+        {
+            lock (Sync)
+                if (_mode == Mode.Waiting && Enabled) Begin();
+        });
     }
 
     // Drop whatever is in progress; for switching off.
     public void Reset()
     {
         _repeat.Change(Timeout.Infinite, Timeout.Infinite);
-        if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
+        _hold.Change(Timeout.Infinite, Timeout.Infinite);
+        EndSecond();
+        if (_mode == Mode.Button || _upPending)
+        {
+            _buttonRelease.Change(Timeout.Infinite, Timeout.Infinite);
+            _upPending = false;
+            Effects.Mouse(_buttonUp, _buttonData);
+        }
         _mode = Mode.None;
         _modePad = null;
         _repeatKey = 0;
@@ -106,22 +158,21 @@ sealed class Gestures
             pad.Button = button;
             return;
         }
-        if (button && !pad.Button && EdgeKey(pad) is ushort key)
+        if (button && !pad.Button && Find(pad) is string slot)
         {
-            StartEdge(pad, key);
+            Start(pad, slot);
         }
-        else if (button && !pad.Button && pad.Contacts >= 3)
+        else if (button && !pad.Button && pad.Contacts >= 3 && _mode == Mode.None)
         {
-            int fingers = ClickFingers(pad);
-            if (fingers == 3) StartMiddle(pad);
-            else if (_mode == Mode.None)
-                Log.Write($"{pad.Contacts} fingers, counted {fingers} (landed {pad.LandingsText} ms before the last), left to Windows");
+            Note(pad.Contacts >= 4 ? "four" : "three", "windows");
+            Log.Write($"{pad.Contacts} fingers, counted {ClickFingers(pad)} (landed {pad.LandingsText} ms before the last), left to Windows");
         }
         else if (!button && pad.Button && pad == _modePad)
         {
             End();
         }
         pad.Button = button;
+        if (_mode == Mode.Button && pad == _modePad && _slot.Contains('-')) SecondPress(pad);
 
         if (_drag != Drag.None && pad == _dragPad)
         {
@@ -141,14 +192,15 @@ sealed class Gestures
         if (_mode == Mode.None && DragMouse(msg, info)) return true;
         if (msg is WM_LBUTTONDOWN or WM_RBUTTONDOWN)
         {
-            if (_modePad == null)
-            {
-                if (FreshPad(p => EdgeKey(p) != null) is Pad edge) StartEdge(edge, EdgeKey(edge)!.Value);
-                else if (FreshPad(p => p.Contacts >= 3 && ClickFingers(p) == 3) is Pad pad) StartMiddle(pad);
-            }
+            if (_modePad == null && FreshPad(p => Find(p) != null) is Pad pad) Start(pad, Find(pad)!);
             if (_modePad != null)
             {
                 _swallowing = true;
+                if (!_pressSeen)
+                {
+                    _pressSeen = true;
+                    _pressRight = msg == WM_RBUTTONDOWN;
+                }
                 return true;
             }
         }
@@ -161,7 +213,7 @@ sealed class Gestures
         return false;
     }
 
-    // ---- Three fingers.
+    // ---- One-finger edge clicks and three/four-finger clicks.
 
     // How many fingers a click is made with, by how they landed. The last fingers to
     // land within TogetherMs of each other are the fresh group:
@@ -184,48 +236,179 @@ sealed class Gestures
         return before.Length >= 2 && before[^2] <= SameMotionMs ? before.Length : 1;
     }
 
-    // The media key for a one-finger click at the right edge, or null elsewhere.
-    static ushort? EdgeKey(Pad pad)
+    // The gesture slot a click on the pad would be, if its action is not left to Windows.
+    static string? Find(Pad pad)
     {
-        if (pad.Contacts != 1 || pad.YFingers != 1) return null;
+        var config = Settings.Current;
+        string? slot = pad.Contacts == 1 ? EdgeSlot(pad, config)
+            : pad.Contacts >= 3 ? ClickFingers(pad) switch { 3 => "three", 4 => "four", _ => null }
+            : null;
+        return slot != null && config.For(slot).Action != GestureAction.Windows ? slot : null;
+    }
+
+    // The edge zone under a single finger, or null away from the edges.
+    public static string? EdgeSlot(Pad pad, Config config)
+    {
+        if (pad.YFingers != 1) return null;
         double x = (pad.Xs[0] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
-        if (x < 1 - EdgeWidth) return null;
+        string side = x <= config.LeftEdge / 100.0 ? "left" : x >= 1 - config.RightEdge / 100.0 ? "right" : "";
+        if (side == "") return null;
         // Y grows downward.
         double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
-        return y < 1.0 / 3 ? VK_VOLUME_UP : y > 2.0 / 3 ? VK_VOLUME_DOWN : VK_MEDIA_PLAY_PAUSE;
+        return side + (y < 1.0 / 3 ? "-top" : y > 2.0 / 3 ? "-bottom" : "-middle");
     }
 
-    void StartMiddle(Pad pad)
+    void Start(Pad pad, string slot)
     {
         if (_mode != Mode.None) return;
-        _mode = Mode.Middle;
+        var binding = Settings.Current.For(slot);
         _modePad = pad;
-        Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
-        Log.Write($"middle (3 fingers, landed {pad.LandingsText} ms before the last)");
+        _slot = slot;
+        _action = binding.Action;
+        _pressSeen = false;
+        _holdFinger = pad.Ids[0];
+        _second = 0;
+        _secondSince = 0;
+        if (binding.Trigger == Trigger.Hold)
+        {
+            _mode = Mode.Waiting;
+            _hold.Change(Settings.Current.HoldMs, Timeout.Infinite);
+        }
+        else Begin();
     }
 
-    // Play/pause goes at once; a volume step repeats while held.
-    void StartEdge(Pad pad, ushort key)
+    // The action itself. A media key goes at once; a volume step repeats while held;
+    // the middle button is held while the pad is.
+    void Begin()
     {
-        if (_mode != Mode.None) return;
-        _mode = Mode.Edge;
-        _modePad = pad;
+        string fingers = _slot is "three" or "four" ? $" (landed {_modePad?.LandingsText} ms before the last)" : "";
+        Log.Write($"{_slot}: {_action}{fingers}");
+        Note(_slot, "action");
+        if (_action is GestureAction.MiddleClick or GestureAction.DictationButton)
+        {
+            _mode = Mode.Button;
+            bool x = _action == GestureAction.DictationButton;
+            uint down = x ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_MIDDLEDOWN;
+            // The same button still down from a press let go too soon: it just stays down.
+            bool stillDown = _upPending && down == _buttonDown;
+            if (_upPending && !stillDown) Effects.Mouse(_buttonUp, _buttonData);
+            _buttonRelease.Change(Timeout.Infinite, Timeout.Infinite);
+            _upPending = false;
+            _buttonDown = down;
+            _buttonUp = x ? MOUSEEVENTF_XUP : MOUSEEVENTF_MIDDLEUP;
+            _buttonData = x ? XBUTTON2 : 0;
+            _buttonHeld = Settings.Current.For(_slot).Trigger == Trigger.Hold;
+            _buttonAt = Environment.TickCount64;
+            if (!stillDown) Effects.Mouse(_buttonDown, _buttonData);
+            return;
+        }
+        _mode = Mode.Key;
+        ushort key = _action switch
+        {
+            GestureAction.PlayPause => VK_MEDIA_PLAY_PAUSE,
+            GestureAction.NextTrack => VK_MEDIA_NEXT_TRACK,
+            GestureAction.PrevTrack => VK_MEDIA_PREV_TRACK,
+            GestureAction.VolumeUp => VK_VOLUME_UP,
+            GestureAction.VolumeDown => VK_VOLUME_DOWN,
+            _ => VK_VOLUME_MUTE,
+        };
         Effects.Key(key);
-        if (key != VK_MEDIA_PLAY_PAUSE)
+        if (key is VK_VOLUME_UP or VK_VOLUME_DOWN)
         {
             _repeatKey = key;
             _repeat.Change(RepeatDelayMs, RepeatMs);
         }
-        Log.Write(key switch { VK_VOLUME_UP => "edge: volume up", VK_VOLUME_DOWN => "edge: volume down", _ => "edge: play/pause" });
     }
 
     void End()
     {
-        if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
+        if (_mode == Mode.Waiting)
+        {
+            // Let go before HoldMs: an ordinary click.
+            _hold.Change(Timeout.Infinite, Timeout.Infinite);
+            if (_pressSeen) Effects.Click(_pressRight);
+            Note(_slot, "early");
+            Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
+        }
+        EndSecond();
+        if (_mode == Mode.Button)
+        {
+            long left = MinHeldMs - (Environment.TickCount64 - _buttonAt);
+            if (_buttonHeld && left > 0)
+            {
+                _upPending = true;
+                _buttonRelease.Change(left, Timeout.Infinite);
+            }
+            else Effects.Mouse(_buttonUp, _buttonData);
+        }
         _repeat.Change(Timeout.Infinite, Timeout.Infinite);
         _repeatKey = 0;
         _mode = Mode.None;
         _modePad = null;
+    }
+
+    void SecondPress(Pad pad)
+    {
+        var config = Settings.Current;
+        if (!config.SecondPress) return;
+        double threshold = _second == 0 ? config.PressForce : config.PressForce * 0.6;
+        int pressing = 0;
+        for (int i = 0; i < pad.YFingers; i++)
+            if (pad.Ids[i] != _holdFinger && pad.Pressures[i] >= threshold) pressing++;
+        long now = Environment.TickCount64;
+        if (_second != 0)
+        {
+            if (pressing == 0) EndSecond();
+            return;
+        }
+        if (pressing == 0)
+        {
+            _secondSince = 0;
+            return;
+        }
+        if (_secondSince == 0) _secondSince = now;
+        // One finger: wait a moment for a second one, which makes it a right click.
+        if (pressing < 2 && now - _secondSince < SecondPairMs) return;
+        _second = pressing >= 2 ? 2 : 1;
+        Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
+        Log.Write($"{_slot}: second press, {(_second == 2 ? "right" : "left")} down");
+        Note(_slot, _second == 2 ? "second-right" : "second-left");
+    }
+
+    void EndSecond()
+    {
+        if (_second != 0) Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP);
+        _second = 0;
+        _secondSince = 0;
+    }
+
+    // ---- For the settings window: the pad touched last, its fingers, the gesture
+    // pressed on it, and the last gestures.
+
+    readonly List<GestureEvent> _events = new();
+    int _eventSeq;
+
+    // What: "action" (the gesture fired), "early" (a hold let go early: a normal click),
+    // "windows" (a 3+ finger click left to Windows), "second-left"/"second-right".
+    void Note(string slot, string what)
+    {
+        var action = Settings.Current.For(slot).Action;
+        _events.Add(new GestureEvent(++_eventSeq, slot, what, action));
+        if (_events.Count > 8) _events.RemoveAt(0);
+    }
+
+    public Live? Snapshot()
+    {
+        var pad = Pads.Where(p => p.XMax > 0).MaxBy(p => p.LastReport);
+        if (pad == null) return null;
+        double w = Math.Max(1, pad.XMax - pad.XMin), h = Math.Max(1, pad.YMax - pad.YMin);
+        var fingers = new double[pad.Contacts > 0 ? Math.Min(pad.YFingers, Pad.MaxFingers) : 0][];
+        for (int i = 0; i < fingers.Length; i++)
+            fingers[i] = new[] { (pad.Xs[i] - pad.XMin) / w, (pad.Ys[i] - pad.YMin) / h, pad.Pressures[i] };
+        string? active = pad == _modePad ? _slot : null;
+        return new Live(w / h, fingers, pad.Button, active, _mode == Mode.Waiting,
+            pad.Contacts == 1 ? EdgeSlot(pad, Settings.Current) : null, pad.Contacts,
+            _events.ToArray(), pad.Raw == null ? null : Convert.ToHexString(pad.Raw));
     }
 
     // ---- Two fingers.
@@ -249,6 +432,7 @@ sealed class Gestures
             _dragPad = pad;
             _dragPadPressed = pad.Button;
             _dragRight = msg == WM_RBUTTONDOWN;
+            _clickRight = _dragRight || ClickFingers(pad) == 2;
             _upSeen = _swallowUp = false;
             _dragFrom = new POINT { X = info.X, Y = info.Y };
             _dragStart = Environment.TickCount64;
@@ -337,8 +521,8 @@ sealed class Gestures
 
     void EndDrag(string by)
     {
-        if (_drag == Drag.Pending) Effects.Click(_dragRight);
-        Log.Write($"two-finger {(_dragRight ? "right" : "left")} press -> {_drag switch { Drag.Moving => "window drag", Drag.Passing => "selection", _ => "click" }}"
+        if (_drag == Drag.Pending) Effects.Click(_clickRight);
+        Log.Write($"two-finger {(_dragRight ? "right" : "left")} press -> {_drag switch { Drag.Moving => "window drag", Drag.Passing => "selection", _ => _clickRight ? "right click" : "left click" }}"
                   + $", {Environment.TickCount64 - _dragStart} ms, ended by {by}");
         // In Passing the real button up went through to the app already.
         _swallowUp = _drag != Drag.Passing && !_upSeen;
@@ -367,3 +551,13 @@ sealed class Gestures
         return !Unmovable.Contains(name.ToString());
     }
 }
+
+// One frame of the live view: pad width/height, fingers as 0..1 positions plus pressure
+// (-1: not reported), whether it is
+// pressed, the gesture slot pressed (Waiting: still within its hold), the zone under a
+// lone finger, the contact count, the last gestures, and with the test on the report's
+// bytes in hex.
+sealed record Live(double Aspect, double[][] Fingers, bool Pressed, string? Active, bool Waiting, string? Under,
+    int Contacts, GestureEvent[] Events, string? Raw);
+
+sealed record GestureEvent(int Seq, string Slot, string What, GestureAction Action);

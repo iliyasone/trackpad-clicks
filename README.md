@@ -4,15 +4,57 @@ Mac-like physical-click gestures for a precision touchpad on Windows, made for a
 Apple Magic Trackpad. Windows can only bind three- and four-finger *taps* to actions;
 TrackpadClicks binds them to real *clicks*, so a light touch never triggers anything.
 
+The one-finger edge clicks and the three- and four-finger clicks are set up in the
+settings window (click the tray icon). It draws the pad with its six edge zones and
+shows your fingers on it live; pick a zone or a finger count, then its action:
+
+- middle mouse button, held while the pad is held;
+- dictation button: mouse button 5 ("forward") held while the pad is held, to bind
+  as the dictation trigger in Ciao and keep the middle button free for apps. After a
+  hold it stays down at least 0.45 s, so Ciao never takes it for a short tap (which
+  would start hands-free dictation);
+- play/pause, next track, previous track;
+- volume up, volume down (a step; held, it repeats), mute;
+- nothing — the click goes to Windows as usual.
+
+Each also has a trigger. **On click** acts on the press. **On hold** leaves a short
+click a normal click and acts only once the pad is held down for the hold time
+(400 ms by default). The pad's driver reports no finger pressure, so a hold is the
+way to tell a deliberate press from a click. The width of each edge (by default 30%
+of the pad on the left, 20% on the right) and the hold time are set there too.
+
+**Second press.** While an edge zone holds the middle button, the pad's one button is
+already down, so pressing another finger makes no new click. With Magic Trackpad
+driver 2.2 or later, which reports each finger's pressure, another finger pressing past
+the set force presses the left button, two fingers the right one, until they ease off.
+On by default; the force is a slider. The test panel shows each finger's pressure.
+
+**Тест** in the window's header shows what the program sees: the button, the finger
+count, the last gestures and what they did, and the raw bytes of each report, with the
+bytes that change flashing — press harder without moving a finger to see whether
+anything in the report follows the force. Settings are saved at once to
+`%APPDATA%\TrackpadClicks\config.json`.
+
+Defaults:
+
 | Click | What it does |
 | --- | --- |
 | 3 fingers | Middle mouse button |
+| 4 fingers | Left to Windows |
+| 1 finger, left edge, top third, hold | Next track |
+| 1 finger, left edge, middle third, hold | Dictation button (push-to-talk in Ciao) |
+| 1 finger, left edge, bottom third, hold | Previous track |
 | 1 finger, right edge, top third | Volume up a step; hold to repeat |
 | 1 finger, right edge, middle third | Media play/pause |
 | 1 finger, right edge, bottom third | Volume down a step; hold to repeat |
+
+Two-finger clicks are not configurable:
+
+| Click | What it does |
+| --- | --- |
 | 2 fingers, hold, both fingers slide | Drag the window under the cursor, grabbed from any point |
 | 2 fingers, hold, one finger stays, one slides | Normal selection drag, as without TrackpadClicks |
-| 2 fingers, release in place | Normal click (right or left, as Windows decided) |
+| 2 fingers, release in place | Right click when both fingers came down together, however far apart; left when one was resting (a thumb) |
 
 Fingers resting on the pad before a click are told apart by when each finger landed.
 Two or more fingers put down together (within 150 ms) make the gesture along with
@@ -20,14 +62,14 @@ any finger already resting, so pointing with one finger and clicking with two mo
 a three-finger click. A single finger added to resting ones more than 0.4 s after
 them is a click by that finger alone and goes to Windows as usual.
 
-The right edge is a strip about 12% of the pad's width. A thumb resting on the pad
-while two fingers click does not make the click a three-finger one: an older finger
-counts only if it moved shortly before. Four-finger clicks are left to Windows.
-One- and two-finger clicks otherwise work as usual.
+A thumb resting on the pad while two fingers click does not make the click a
+three-finger one: an older finger counts only if it moved shortly before. One- and
+two-finger clicks away from the edges work as usual.
 
 ## Requirements
 
 - Windows 11 with the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0).
+  The settings window uses the Microsoft Edge WebView2 Runtime, which Windows 11 has.
 - The touchpad must be a Windows *precision touchpad*. A Magic Trackpad becomes one
   with the [mac-precision-touchpad](https://github.com/imbushuo/mac-precision-touchpad)
   driver.
@@ -58,11 +100,24 @@ off, and red when TrackpadClicks got stuck and switched itself off (see below).
 SSH. It is specific to one setup: the PC is reached as `ssh wsl` then `ssh windows`,
 and the logon task runs as user `iliya`. Adapt both before using it.
 
+## Updates
+
+Nothing is installed while you work. `scripts/stage-update.sh "notes" [driver-dir
+driver-version]` builds and puts the new exe, and optionally a Magic Trackpad driver
+package, into `C:\TrackpadClicks\update`. The tray shows a notice, and the menu and the
+settings window get an **Установить** button; a `trackpadclicks://update` link (Win+R
+works too) does the same. Installing runs `pnputil` for the driver (Windows asks for
+admin rights), swaps the exe and restarts it.
+
+`scripts/deploy.sh` still installs at once, for the first install or when nobody is at
+the PC.
+
 ## Logs
 
 `%LOCALAPPDATA%\TrackpadClicks\log.txt`: start-up, touchpads found, every gesture,
 and any stuck thread. Creating an empty file `C:\TrackpadClicks\debug` adds every
-button press and release per device; it is read at start-up.
+button press and release per device, and the settings window's developer tools (F12);
+it is read at start-up.
 
 ## How it works
 
@@ -75,10 +130,16 @@ Windows synthesizes for a gesture's click. It runs four threads:
   can block;
 - **raw input** (`RawInput.cs`): parses the HID reports;
 - **effects** (`Effects.cs`): SendInput, moving windows, the log;
-- **UI** (`Program.cs`): the tray icon. If the raw input or effects thread is busy
+- **UI** (`Program.cs`): the tray icon and the settings window (`SettingsWindow.cs`,
+  a WebView2 page from `ui/settings.html` embedded in the exe; open that file in a
+  browser to see it with a demo finger). If the raw input or effects thread is busy
   on one call for over 2 s, it switches gestures off, turns the icon red and logs the
   call. The mouse keeps working as a plain touchpad; **Restart** in the menu brings
   gestures back.
 
-What each click means is in `Gestures.cs`. Quirks of the Magic Trackpad driver that
+What each click means is in `Gestures.cs`, with the bindings from `Settings.cs`. Quirks of the Magic Trackpad driver that
 the parsing works around are commented in `RawInput.cs`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).

@@ -38,7 +38,7 @@ static class Effects
     // Our own SendInput calls carry this tag, though the hook already skips injected input.
     static readonly IntPtr Tag = new(0x7C11C);
 
-    public static void Mouse(uint flags) => Worker.Post($"SendInput mouse 0x{flags:X}", () => SendMouse(flags));
+    public static void Mouse(uint flags, uint data = 0) => Worker.Post($"SendInput mouse 0x{flags:X}", () => SendMouse(flags, data));
 
     public static void Key(ushort vk) => Worker.Post($"SendInput key 0x{vk:X}", () => SendKey(vk));
 
@@ -58,10 +58,10 @@ static class Effects
         SetCursorPos(now.X, now.Y);
     });
 
-    static void SendMouse(uint flags) => Send(new INPUT
+    static void SendMouse(uint flags, uint data = 0) => Send(new INPUT
     {
         Type = INPUT_MOUSE,
-        U = new InputUnion { Mouse = new MOUSEINPUT { Flags = flags, ExtraInfo = Tag } },
+        U = new InputUnion { Mouse = new MOUSEINPUT { Flags = flags, MouseData = data, ExtraInfo = Tag } },
     });
 
     static void SendKey(ushort vk)
