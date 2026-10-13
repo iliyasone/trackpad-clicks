@@ -26,7 +26,7 @@
   button { font: inherit; color: inherit; }
   svg { display: block; }
 
-  .app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+  .app { display: grid; grid-template-rows: auto auto 1fr; height: 100%; }
   header { display: flex; align-items: center; gap: 14px; padding: 18px 28px 6px; }
   header .logo { width: 34px; height: 24px; border-radius: 7px; background: var(--pad); border: 1.5px solid var(--pad-edge); }
   header h1 { margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
@@ -133,6 +133,23 @@
   .event .when { margin-left: auto; color: var(--muted); font-size: 12px; }
   .event.fresh { box-shadow: inset 0 0 0 2px var(--accent); }
   .empty { color: var(--muted); font-size: 13px; }
+  .banner { display: none; align-items: center; gap: 14px; margin: 8px 28px 0; padding: 12px 16px; border-radius: 14px;
+    background: var(--accent); color: #fff; }
+  .banner.show { display: flex; }
+  .banner b { font-weight: 600; }
+  .banner span { opacity: .9; font-size: 13px; }
+  .banner button { margin-left: auto; border: 0; border-radius: 9px; padding: 7px 14px; background: #fff; color: var(--accent);
+    font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .mini { transform: scale(.85); transform-origin: right center; }
+  .finger b { position: absolute; left: 50%; top: -20px; transform: translateX(-50%); font: 600 11px/1 "Segoe UI", sans-serif;
+    color: var(--text); background: var(--panel); padding: 2px 5px; border-radius: 5px; white-space: nowrap; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+  .bars { display: flex; flex-direction: column; gap: 6px; }
+  .bar { position: relative; height: 22px; background: var(--panel-2); border-radius: 7px; overflow: hidden; font-size: 12px; }
+  .bar i { position: absolute; inset: 0 auto 0 0; background: var(--accent); opacity: .55; }
+  .bar.hot i { opacity: 1; background: #ff9f0a; }
+  .bar span { position: relative; padding: 0 8px; line-height: 22px; }
+  .bar u { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); opacity: .5; }
   .disabled .pad, .disabled .cards { opacity: .45; filter: grayscale(.6); }
 </style>
 </head>
@@ -148,6 +165,8 @@
     <button class="pill" id="test-toggle">Тест</button>
     <div class="switch on" id="enabled"><span>Жесты включены</span><div class="track"></div></div>
   </header>
+  <div class="banner" id="banner"><div><b id="banner-title"></b><br><span id="banner-notes"></span></div>
+    <button id="banner-install">Установить</button></div>
   <main>
     <section class="stage">
       <div class="pad-wrap">
@@ -188,7 +207,17 @@
       </div>
       <div class="slider">
         <span>Время удержания</span><output id="hold-out"></output>
-        <input type="range" id="hold" min="200" max="1200" step="50">
+        <input type="range" id="hold" min="150" max="1200" step="50">
+      </div>
+      <div class="divider"></div>
+      <div>
+        <div class="row"><span>Второе нажатие</span><div class="switch mini" id="second"><div class="track"></div></div></div>
+        <div class="hint">Пока край держит средний клик, нажми другим пальцем сильнее — левый клик, двумя пальцами — правый.
+          Нужен драйвер Magic Trackpad 2.2: он передаёт силу каждого пальца.</div>
+      </div>
+      <div class="slider">
+        <span>Сила второго нажатия</span><output id="force-out"></output>
+        <input type="range" id="force" min="10" max="250" step="5">
       </div>
      </div>
      <div class="test">
@@ -201,11 +230,15 @@
         <div class="stat" id="t-contacts"><b>0</b><span>пальцев</span></div>
       </div>
       <div>
+        <div class="label">Сила пальцев</div>
+        <div class="bars" id="t-bars"><div class="empty">Положи пальцы на тачпад.</div></div>
+      </div>
+      <div>
         <div class="label">Последние жесты</div>
         <div class="events" id="t-events"><div class="empty">Щёлкни по тачпаду — здесь появится, что сработало.</div></div>
       </div>
       <div>
-        <div class="label">Сильный клик</div>
+        <div class="label">Байты отчёта</div>
         <div class="hint" style="margin:0 0 8px">Положи палец, нажми до щелчка и дави сильнее, не двигая палец. Байты отчёта,
           которые меняются, мигают оранжевым. Если что-то мигает только от силы — силу можно поймать.</div>
         <div class="hex" id="t-hex"><span class="empty">Коснись тачпада…</span></div>
@@ -213,6 +246,7 @@
      </div>
       <div class="foot">
         <button id="log">Открыть лог</button>
+        <span id="version"></span>
         <span class="saved" id="saved">Сохранено ✓</span>
       </div>
     </aside>
@@ -247,7 +281,7 @@ const $ = id => document.getElementById(id);
 const host = window.chrome && window.chrome.webview;
 const send = msg => host && host.postMessage(msg);
 
-let config = null, enabled = true, selected = 'right-middle';
+let config = null, enabled = true, selected = 'right-middle', version = '', update = null;
 
 function render() {
   if (!config) return;
@@ -279,6 +313,15 @@ function render() {
   $('left-edge').value = config.leftEdge; $('left-out').textContent = config.leftEdge + '%';
   $('right-edge').value = config.rightEdge; $('right-out').textContent = config.rightEdge + '%';
   $('hold').value = config.holdMs; $('hold-out').textContent = config.holdMs + ' мс';
+  $('second').classList.toggle('on', config.secondPress);
+  $('force').value = config.pressForce; $('force-out').textContent = config.pressForce;
+  $('force').disabled = !config.secondPress;
+  $('version').textContent = version ? 'версия ' + version : '';
+  $('banner').classList.toggle('show', !!update);
+  if (update) {
+    $('banner-title').textContent = `Готово обновление ${update.version}` + (update.driver ? ` и драйвер ${update.driver}` : '');
+    $('banner-notes').textContent = update.notes || '';
+  }
   $('enabled').classList.toggle('on', enabled);
   $('app').classList.toggle('disabled', !enabled);
   paintLive();
@@ -316,6 +359,14 @@ document.addEventListener('click', e => {
 });
 $('enabled').onclick = () => { enabled = !enabled; render(); send({ type: 'enabled', value: enabled }); };
 $('log').onclick = () => send({ type: 'log' });
+$('second').onclick = () => change(() => config.secondPress = !config.secondPress);
+$('force').oninput = e => { config.pressForce = +e.target.value; render(); };
+$('force').onchange = () => change(() => {});
+$('banner-install').onclick = () => {
+  $('banner-install').textContent = 'Устанавливаю…';
+  $('banner-install').disabled = true;
+  send({ type: 'update' });
+};
 $('left-edge').oninput = e => { config.leftEdge = +e.target.value; render(); };
 $('right-edge').oninput = e => { config.rightEdge = +e.target.value; render(); };
 $('hold').oninput = e => { config.holdMs = +e.target.value; render(); };
@@ -341,7 +392,13 @@ function paintLive() {
   pad.querySelectorAll('.finger').forEach((d, i) => {
     const f = live.fingers[i];
     d.style.display = f ? '' : 'none';
-    if (f) { d.style.left = f[0] * 100 + '%'; d.style.top = f[1] * 100 + '%'; }
+    if (f) {
+      d.style.left = f[0] * 100 + '%'; d.style.top = f[1] * 100 + '%';
+      const p = f[2] >= 0 ? String(Math.round(f[2])) : '';
+      if (!d.firstChild) d.innerHTML = '<b></b>';
+      d.firstChild.textContent = p;
+      d.firstChild.style.display = p && testing ? '' : 'none';
+    }
   });
   document.querySelectorAll('[data-slot]').forEach(z => {
     const s = z.dataset.slot, active = s === live.active;
@@ -358,6 +415,18 @@ function paintTest() {
   $('t-button').classList.toggle('hot', live.pressed);
   $('t-button').querySelector('b').textContent = live.pressed ? 'нажата' : 'отпущена';
   $('t-contacts').querySelector('b').textContent = live.contacts;
+  const fs = live.fingers || [];
+  if (fs.length && fs[0][2] < 0) {
+    $('t-bars').innerHTML = '<div class="empty">Драйвер не передаёт силу пальцев — нужен драйвер Magic Trackpad 2.2.</div>';
+  } else if (fs.length) {
+    const force = config ? config.pressForce : 70;
+    $('t-bars').innerHTML = fs.map((f, i) => {
+      const p = Math.max(0, f[2]);
+      return `<div class="bar ${p >= force ? 'hot' : ''}"><i style="width:${p / 255 * 100}%"></i><u style="left:${force / 255 * 100}%"></u><span>палец ${i + 1}: ${p}</span></div>`;
+    }).join('');
+  } else {
+    $('t-bars').innerHTML = '<div class="empty">Положи пальцы на тачпад.</div>';
+  }
   const events = live.events || [];
   const top = events.length ? events[events.length - 1].seq : 0;
   if (top !== lastSeq) {
@@ -366,9 +435,11 @@ function paintTest() {
     $('t-events').innerHTML = events.slice().reverse().map(ev => {
       const where = SLOTS[ev.slot][0];
       const text = ev.what === 'action' ? `${where} → ${NAMES[ev.action]}`
+        : ev.what === 'second-left' ? `${where} → второе нажатие, левый клик`
+        : ev.what === 'second-right' ? `${where} → второе нажатие, правый клик`
         : ev.what === 'early' ? `${where} → отпущено раньше, обычный клик`
         : `${where} → оставлено Windows`;
-      const sym = ev.what === 'action' ? ev.action : 'windows';
+      const sym = ev.what === 'action' ? ev.action : ev.what.startsWith('second') ? 'windows' : 'windows';
       return `<div class="event ${ev.seq === top ? 'fresh' : ''}" data-seq="${ev.seq}">${icon(sym)}<span>${text}</span><span class="when"></span></div>`;
     }).join('') || $('t-events').innerHTML;
     lastSeq = top;
@@ -397,13 +468,15 @@ function paintTest() {
 if (host) {
   host.addEventListener('message', e => {
     const m = e.data;
-    if (m.type === 'state') { config = m.config; enabled = m.enabled; render(); }
+    if (m.type === 'state') { config = m.config; enabled = m.enabled; version = m.version; update = m.update; render(); }
     else if (m.type === 'live') { live = m; paintLive(); }
   });
   send({ type: 'ready' });
 } else {
   // Opened in a plain browser: a demo with a finger walking along the right edge.
-  config = { leftEdge: 30, rightEdge: 20, holdMs: 400, gestures: {
+  version = '0.3.0';
+  update = { version: '0.3.0', notes: 'Второе нажатие по силе пальца, правый клик двумя пальцами врозь', driver: '2.2' };
+  config = { leftEdge: 30, rightEdge: 20, holdMs: 400, secondPress: true, pressForce: 70, gestures: {
     'left-top': { action: 'nextTrack', trigger: 'hold' }, 'left-middle': { action: 'middleClick', trigger: 'hold' },
     'left-bottom': { action: 'prevTrack', trigger: 'hold' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
     'right-middle': { action: 'playPause', trigger: 'click' }, 'right-bottom': { action: 'volumeDown', trigger: 'click' },
@@ -416,7 +489,7 @@ if (host) {
     const y = 0.5 + 0.42 * Math.sin(t);
     const under = 'right-' + (y < 1 / 3 ? 'top' : y > 2 / 3 ? 'bottom' : 'middle');
     const pressed = Math.sin(t * 3) > 0.9;
-    live = { aspect: 1.503, fingers: [[0.9, y], [0.45, 0.6]], pressed, active: pressed ? under : null, waiting: false, under,
+    live = { aspect: 1.503, fingers: [[0.9, y, 40 + Math.round(30 * Math.sin(t * 2))], [0.45, 0.6, pressed ? 120 : 15]], pressed, active: pressed ? under : null, waiting: false, under,
       contacts: 2, events: [{ seq: 1, slot: 'left-middle', what: 'action', action: 'middleClick' }, { seq: 2, slot: 'right-top', what: 'early', action: 'volumeUp' }],
       raw: '05' + Math.round(y * 255).toString(16).padStart(2, '0') + '1A0000' + (pressed ? '01' : '00') + '3F2C00000000000000000000' };
     paintLive();

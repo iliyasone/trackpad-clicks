@@ -39,6 +39,10 @@ sealed record Config
     public int LeftEdge { get; init; } = 30;
     public int RightEdge { get; init; } = 20;
     public int HoldMs { get; init; } = 400;
+    // While an edge zone holds the middle button, another finger pressing at least this
+    // hard (0..255, driver 2.2+) is a second click: left, or right with two fingers.
+    public bool SecondPress { get; init; } = true;
+    public int PressForce { get; init; } = 70;
 
     public Binding For(string slot) => Gestures.TryGetValue(slot, out var b) ? b : new(GestureAction.Windows);
 
@@ -54,6 +58,7 @@ sealed record Config
             LeftEdge = Math.Clamp(LeftEdge, 5, 45),
             RightEdge = Math.Clamp(RightEdge, 5, 45),
             HoldMs = Math.Clamp(HoldMs, 150, 2000),
+            PressForce = Math.Clamp(PressForce, 10, 250),
         };
     }
 }

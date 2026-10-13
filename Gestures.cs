@@ -12,12 +12,19 @@
 // button (held while the pad is), a media key, a volume step (repeating while held like
 // a held key), or nothing, left to Windows. With the Hold trigger the press is held back:
 // released before HoldMs it is replayed as the click it was, held longer it is the action.
+//
+// Second press: while an edge zone holds the middle button, the pad's one button is
+// already down, so another finger pressing gives no new click. With driver 2.2+ each
+// finger reports its pressure: another finger pressing past PressForce presses the left
+// button (two fingers: the right one) until it eases off to 60% of that.
 // Click with 2 fingers: Windows makes it a left press (one finger holds the click, the
 // other drags a selection) or a right click, and which one the user means is not known
 // at press time. So the press is held back and the fingers decide:
 //   both fingers travel        -> drag the window under the cursor, from any point of it;
 //   one travels, one stays     -> the press is replayed, a normal selection;
-//   released without travel    -> the press is replayed as the click it was.
+//   released without travel    -> a click: right when both fingers came down together
+//                                 (Windows makes two fingers far apart a left click, as
+//                                 if one were a resting thumb), else the one Windows made.
 // The left/right press Windows makes for these clicks is swallowed by the hook.
 
 using static TrackpadClicks.Native;
@@ -62,6 +69,13 @@ sealed class Gestures
     bool _pressSeen, _pressRight;
     readonly System.Threading.Timer _hold;
 
+    // Second press: the finger holding the edge, the button pressed by others (0 none,
+    // 1 left, 2 right), and since when one finger presses (to wait for a second one).
+    uint _holdFinger;
+    int _second;
+    long _secondSince;
+    const long SecondPairMs = 60;
+
     // The volume key held, or 0.
     ushort _repeatKey;
     readonly System.Threading.Timer _repeat;
@@ -71,6 +85,8 @@ sealed class Gestures
     Pad? _dragPad;
     bool _dragPadPressed;
     bool _dragRight;
+    // The click a press released in place becomes; see the comment at the top.
+    bool _clickRight;
     bool _upSeen, _swallowUp;
     POINT _dragFrom;
     long _dragStart;
@@ -98,6 +114,7 @@ sealed class Gestures
     {
         _repeat.Change(Timeout.Infinite, Timeout.Infinite);
         _hold.Change(Timeout.Infinite, Timeout.Infinite);
+        EndSecond();
         if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
         _mode = Mode.None;
         _modePad = null;
@@ -131,6 +148,7 @@ sealed class Gestures
             End();
         }
         pad.Button = button;
+        if (_mode == Mode.Middle && pad == _modePad && _slot.Contains('-')) SecondPress(pad);
 
         if (_drag != Drag.None && pad == _dragPad)
         {
@@ -224,6 +242,9 @@ sealed class Gestures
         _slot = slot;
         _action = binding.Action;
         _pressSeen = false;
+        _holdFinger = pad.Ids[0];
+        _second = 0;
+        _secondSince = 0;
         if (binding.Trigger == Trigger.Hold)
         {
             _mode = Mode.Waiting;
@@ -273,11 +294,47 @@ sealed class Gestures
             Note(_slot, "early");
             Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
         }
+        EndSecond();
         if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
         _repeat.Change(Timeout.Infinite, Timeout.Infinite);
         _repeatKey = 0;
         _mode = Mode.None;
         _modePad = null;
+    }
+
+    void SecondPress(Pad pad)
+    {
+        var config = Settings.Current;
+        if (!config.SecondPress) return;
+        double threshold = _second == 0 ? config.PressForce : config.PressForce * 0.6;
+        int pressing = 0;
+        for (int i = 0; i < pad.YFingers; i++)
+            if (pad.Ids[i] != _holdFinger && pad.Pressures[i] >= threshold) pressing++;
+        long now = Environment.TickCount64;
+        if (_second != 0)
+        {
+            if (pressing == 0) EndSecond();
+            return;
+        }
+        if (pressing == 0)
+        {
+            _secondSince = 0;
+            return;
+        }
+        if (_secondSince == 0) _secondSince = now;
+        // One finger: wait a moment for a second one, which makes it a right click.
+        if (pressing < 2 && now - _secondSince < SecondPairMs) return;
+        _second = pressing >= 2 ? 2 : 1;
+        Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
+        Log.Write($"{_slot}: second press, {(_second == 2 ? "right" : "left")} down");
+        Note(_slot, _second == 2 ? "second-right" : "second-left");
+    }
+
+    void EndSecond()
+    {
+        if (_second != 0) Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP);
+        _second = 0;
+        _secondSince = 0;
     }
 
     // ---- For the settings window: the pad touched last, its fingers, the gesture
@@ -287,7 +344,7 @@ sealed class Gestures
     int _eventSeq;
 
     // What: "action" (the gesture fired), "early" (a hold let go early: a normal click),
-    // "windows" (a 3+ finger click left to Windows).
+    // "windows" (a 3+ finger click left to Windows), "second-left"/"second-right".
     void Note(string slot, string what)
     {
         var action = Settings.Current.For(slot).Action;
@@ -302,7 +359,7 @@ sealed class Gestures
         double w = Math.Max(1, pad.XMax - pad.XMin), h = Math.Max(1, pad.YMax - pad.YMin);
         var fingers = new double[pad.Contacts > 0 ? Math.Min(pad.YFingers, Pad.MaxFingers) : 0][];
         for (int i = 0; i < fingers.Length; i++)
-            fingers[i] = new[] { (pad.Xs[i] - pad.XMin) / w, (pad.Ys[i] - pad.YMin) / h };
+            fingers[i] = new[] { (pad.Xs[i] - pad.XMin) / w, (pad.Ys[i] - pad.YMin) / h, pad.Pressures[i] };
         string? active = pad == _modePad ? _slot : null;
         return new Live(w / h, fingers, pad.Button, active, _mode == Mode.Waiting,
             pad.Contacts == 1 ? EdgeSlot(pad, Settings.Current) : null, pad.Contacts,
@@ -330,6 +387,7 @@ sealed class Gestures
             _dragPad = pad;
             _dragPadPressed = pad.Button;
             _dragRight = msg == WM_RBUTTONDOWN;
+            _clickRight = _dragRight || ClickFingers(pad) == 2;
             _upSeen = _swallowUp = false;
             _dragFrom = new POINT { X = info.X, Y = info.Y };
             _dragStart = Environment.TickCount64;
@@ -418,8 +476,8 @@ sealed class Gestures
 
     void EndDrag(string by)
     {
-        if (_drag == Drag.Pending) Effects.Click(_dragRight);
-        Log.Write($"two-finger {(_dragRight ? "right" : "left")} press -> {_drag switch { Drag.Moving => "window drag", Drag.Passing => "selection", _ => "click" }}"
+        if (_drag == Drag.Pending) Effects.Click(_clickRight);
+        Log.Write($"two-finger {(_dragRight ? "right" : "left")} press -> {_drag switch { Drag.Moving => "window drag", Drag.Passing => "selection", _ => _clickRight ? "right click" : "left click" }}"
                   + $", {Environment.TickCount64 - _dragStart} ms, ended by {by}");
         // In Passing the real button up went through to the app already.
         _swallowUp = _drag != Drag.Passing && !_upSeen;
@@ -449,7 +507,8 @@ sealed class Gestures
     }
 }
 
-// One frame of the live view: pad width/height, fingers as 0..1 positions, whether it is
+// One frame of the live view: pad width/height, fingers as 0..1 positions plus pressure
+// (-1: not reported), whether it is
 // pressed, the gesture slot pressed (Waiting: still within its hold), the zone under a
 // lone finger, the contact count, the last gestures, and with the test on the report's
 // bytes in hex.

@@ -19,6 +19,12 @@ click a normal click and acts only once the pad is held down for the hold time
 way to tell a deliberate press from a click. The width of each edge (by default 30%
 of the pad on the left, 20% on the right) and the hold time are set there too.
 
+**Second press.** While an edge zone holds the middle button, the pad's one button is
+already down, so pressing another finger makes no new click. With Magic Trackpad
+driver 2.2 or later, which reports each finger's pressure, another finger pressing past
+the set force presses the left button, two fingers the right one, until they ease off.
+On by default; the force is a slider. The test panel shows each finger's pressure.
+
 **Тест** in the window's header shows what the program sees: the button, the finger
 count, the last gestures and what they did, and the raw bytes of each report, with the
 bytes that change flashing — press harder without moving a finger to see whether
@@ -44,7 +50,7 @@ Two-finger clicks are not configurable:
 | --- | --- |
 | 2 fingers, hold, both fingers slide | Drag the window under the cursor, grabbed from any point |
 | 2 fingers, hold, one finger stays, one slides | Normal selection drag, as without TrackpadClicks |
-| 2 fingers, release in place | Normal click (right or left, as Windows decided) |
+| 2 fingers, release in place | Right click when both fingers came down together, however far apart; left when one was resting (a thumb) |
 
 Fingers resting on the pad before a click are told apart by when each finger landed.
 Two or more fingers put down together (within 150 ms) make the gesture along with
@@ -89,6 +95,18 @@ off, and red when TrackpadClicks got stuck and switched itself off (see below).
 `scripts/deploy.sh` builds and installs to `C:\TrackpadClicks` on a remote PC over
 SSH. It is specific to one setup: the PC is reached as `ssh wsl` then `ssh windows`,
 and the logon task runs as user `iliya`. Adapt both before using it.
+
+## Updates
+
+Nothing is installed while you work. `scripts/stage-update.sh "notes" [driver-dir
+driver-version]` builds and puts the new exe, and optionally a Magic Trackpad driver
+package, into `C:\TrackpadClicks\update`. The tray shows a notice, and the menu and the
+settings window get an **Установить** button; a `trackpadclicks://update` link (Win+R
+works too) does the same. Installing runs `pnputil` for the driver (Windows asks for
+admin rights), swaps the exe and restarts it.
+
+`scripts/deploy.sh` still installs at once, for the first install or when nobody is at
+the PC.
 
 ## Logs
 

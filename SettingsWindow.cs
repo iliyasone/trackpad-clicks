@@ -10,20 +10,22 @@ namespace TrackpadClicks;
 // draws the trackpad, its gesture zones and the fingers on it live. Runs on the UI
 // thread. Messages, as JSON:
 //   page -> app: {type:"ready"}, {type:"config", config}, {type:"enabled", value}, {type:"log"},
-//                {type:"test", value} (the report bytes in "live" while on)
-//   app -> page: {type:"state", config, enabled, actions}, {type:"live", ...Live}
+//                {type:"test", value} (the report bytes in "live" while on), {type:"update"}
+//   app -> page: {type:"state", config, enabled, version, update}, {type:"live", ...Live}
 sealed class SettingsWindow : Form
 {
     readonly Gestures _gestures;
     readonly Action<bool> _setEnabled;
+    readonly Action _installUpdate;
     readonly WebView2 _web = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.Transparent };
     readonly System.Windows.Forms.Timer _live = new() { Interval = 33 };
     string _lastLive = "";
 
-    public SettingsWindow(Gestures gestures, Action<bool> setEnabled)
+    public SettingsWindow(Gestures gestures, Action<bool> setEnabled, Action installUpdate)
     {
         _gestures = gestures;
         _setEnabled = setEnabled;
+        _installUpdate = installUpdate;
         Text = "TrackpadClicks";
         Icon = Tray.AppIcon;
         StartPosition = FormStartPosition.CenterScreen;
@@ -92,6 +94,9 @@ sealed class SettingsWindow : Form
             case "test":
                 RawInput.Capture = (bool)message!["value"]!;
                 break;
+            case "update":
+                _installUpdate();
+                break;
             case "log":
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Log.Path) { UseShellExecute = true });
                 break;
@@ -107,6 +112,8 @@ sealed class SettingsWindow : Form
             ["type"] = "state",
             ["config"] = JsonSerializer.SerializeToNode(Settings.Current, Settings.Json),
             ["enabled"] = Gestures.Enabled,
+            ["version"] = Updater.Current,
+            ["update"] = JsonSerializer.SerializeToNode(Updater.Check(), Settings.Json),
         };
         _web.CoreWebView2.PostWebMessageAsJson(state.ToJsonString());
     }
