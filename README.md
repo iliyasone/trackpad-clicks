@@ -139,3 +139,7 @@ Windows synthesizes for a gesture's click. It runs four threads:
 
 What each click means is in `Gestures.cs`, with the bindings from `Settings.cs`. Quirks of the Magic Trackpad driver that
 the parsing works around are commented in `RawInput.cs`.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
