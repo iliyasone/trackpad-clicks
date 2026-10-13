@@ -49,6 +49,7 @@ static class Program
         Updater.Clean();
         Worker.Start();
         Media.Start();
+        Ciao.Start();
         var gestures = new Gestures();
         RawInput.Start(gestures);
         MouseHook.Start(gestures);

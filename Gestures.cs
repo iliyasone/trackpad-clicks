@@ -14,7 +14,7 @@
 // a held key), a T3 Code agent action (send, stop, voice), or nothing, left to Windows. With the Hold trigger the press is held back:
 // released before HoldMs it is replayed as the click it was, held longer it is the action.
 // On a dictation zone a quick double click taps mouse button 5 instead: hands-free
-// dictation in Ciao, on and off.
+// dictation in Ciao on. While it is on (Ciao.cs), a single click taps it: off.
 //
 // Second press: while an edge zone holds a mouse button, the pad's one button is
 // already down, so another finger pressing gives no new click. With driver 2.2+ each
@@ -93,8 +93,8 @@ sealed class Gestures
 
     // Double click on a dictation zone: two short clicks, the second pressed within
     // DoubleMs of the first's release, tap mouse button 5 — Ciao takes a tap for
-    // hands-free dictation, on and off. The first click stays a click (waiting for a
-    // second would delay every click there); the second is swallowed.
+    // hands-free dictation. The first click stays a click (waiting for a second would
+    // delay every click there); the second is swallowed. One click stops it.
     string _earlySlot = "";
     long _earlyAt, _startAt;
     const long DoubleMs = 400;
@@ -350,7 +350,17 @@ sealed class Gestures
         {
             // Let go before HoldMs: an ordinary click, or the second of a double click.
             _hold.Change(Timeout.Infinite, Timeout.Infinite);
-            if (_action == GestureAction.DictationButton && _earlySlot == _slot && _startAt - _earlyAt < DoubleMs)
+            if (_action == GestureAction.DictationButton && Ciao.HandsFree)
+            {
+                // Set now: a quick second click must not start it again before Ciao says so.
+                Ciao.HandsFree = false;
+                _earlySlot = "";
+                Effects.Mouse(MOUSEEVENTF_XDOWN, XBUTTON2);
+                Effects.Mouse(MOUSEEVENTF_XUP, XBUTTON2);
+                Note(_slot, "stop");
+                Log.Write($"{_slot}: click while hands-free, dictation button tap");
+            }
+            else if (_action == GestureAction.DictationButton && _earlySlot == _slot && _startAt - _earlyAt < DoubleMs)
             {
                 _earlySlot = "";
                 Effects.Mouse(MOUSEEVENTF_XDOWN, XBUTTON2);

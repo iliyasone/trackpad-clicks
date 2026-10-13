@@ -478,6 +478,7 @@ function paintTest() {
         : ev.what === 'second-right' ? `${where} → второе нажатие, правый клик`
         : ev.what === 'early' ? `${where} → отпущено раньше, обычный клик`
         : ev.what === 'double' ? `${where} → двойной клик: диктовка без рук`
+        : ev.what === 'stop' ? `${where} → клик: диктовка остановлена`
         : `${where} → оставлено Windows`;
       const sym = ev.what === 'action' ? ev.action : ev.what.startsWith('second') ? 'windows' : 'windows';
       return `<div class="event ${ev.seq === top ? 'fresh' : ''}" data-seq="${ev.seq}">${icon(sym)}<span>${text}</span><span class="when"></span></div>`;
