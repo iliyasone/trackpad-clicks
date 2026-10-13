@@ -8,10 +8,10 @@
 //
 // Click with 3 fingers = middle button. Four or more fingers: nothing, left to Windows.
 // Click with 1 finger (a thumb, say) at an edge of the pad, by height:
-//                  left edge         right edge
-//   top third      next track        volume up a step; held, it repeats like a held key
-//   middle third   media play/pause  middle button (record)
-//   bottom third   previous track    volume down, like volume up
+//                  left edge                                  right edge
+//   top third      volume up a step; held, repeats like a key  next track
+//   middle third   media play/pause                            middle button (voice)
+//   bottom third   volume down, like volume up                 previous track
 // Click with 2 fingers: Windows makes it a left press (one finger holds the click, the
 // other drags a selection) or a right click, and which one the user means is not known
 // at press time. So the press is held back and the fingers decide:
@@ -199,8 +199,8 @@ sealed class Gestures
         double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
         int third = y < 1.0 / 3 ? 0 : y > 2.0 / 3 ? 2 : 1;
         return left
-            ? third switch { 0 => VK_MEDIA_NEXT_TRACK, 1 => VK_MEDIA_PLAY_PAUSE, _ => VK_MEDIA_PREV_TRACK }
-            : third switch { 0 => VK_VOLUME_UP, 1 => EdgeMiddle, _ => VK_VOLUME_DOWN };
+            ? third switch { 0 => VK_VOLUME_UP, 1 => VK_MEDIA_PLAY_PAUSE, _ => VK_VOLUME_DOWN }
+            : third switch { 0 => VK_MEDIA_NEXT_TRACK, 1 => EdgeMiddle, _ => VK_MEDIA_PREV_TRACK };
     }
 
     void StartMiddle(Pad pad)
