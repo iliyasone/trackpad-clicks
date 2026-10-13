@@ -13,6 +13,8 @@
 // MinHeldMs, so an app never takes a held gesture for a short tap), a media key, a volume step (repeating while held like
 // a held key), a T3 Code agent action (send, stop, voice), or nothing, left to Windows. With the Hold trigger the press is held back:
 // released before HoldMs it is replayed as the click it was, held longer it is the action.
+// On a dictation zone a quick double click taps mouse button 5 instead: hands-free
+// dictation in Ciao, on and off.
 //
 // Second press: while an edge zone holds a mouse button, the pad's one button is
 // already down, so another finger pressing gives no new click. With driver 2.2+ each
@@ -88,6 +90,14 @@ sealed class Gestures
     bool _buttonHeld, _upPending;
     readonly System.Threading.Timer _buttonRelease;
     const long MinHeldMs = 450;
+
+    // Double click on a dictation zone: two short clicks, the second pressed within
+    // DoubleMs of the first's release, tap mouse button 5 — Ciao takes a tap for
+    // hands-free dictation, on and off. The first click stays a click (waiting for a
+    // second would delay every click there); the second is swallowed.
+    string _earlySlot = "";
+    long _earlyAt, _startAt;
+    const long DoubleMs = 400;
 
     // The volume key held, or 0.
     ushort _repeatKey;
@@ -270,6 +280,7 @@ sealed class Gestures
         _slot = slot;
         _action = binding.Action;
         _pressSeen = false;
+        _startAt = Environment.TickCount64;
         _holdFinger = pad.Ids[0];
         _second = 0;
         _secondSince = 0;
@@ -337,11 +348,24 @@ sealed class Gestures
     {
         if (_mode == Mode.Waiting)
         {
-            // Let go before HoldMs: an ordinary click.
+            // Let go before HoldMs: an ordinary click, or the second of a double click.
             _hold.Change(Timeout.Infinite, Timeout.Infinite);
-            if (_pressSeen) Effects.Click(_pressRight);
-            Note(_slot, "early");
-            Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
+            if (_action == GestureAction.DictationButton && _earlySlot == _slot && _startAt - _earlyAt < DoubleMs)
+            {
+                _earlySlot = "";
+                Effects.Mouse(MOUSEEVENTF_XDOWN, XBUTTON2);
+                Effects.Mouse(MOUSEEVENTF_XUP, XBUTTON2);
+                Note(_slot, "double");
+                Log.Write($"{_slot}: double click, dictation button tap");
+            }
+            else
+            {
+                if (_pressSeen) Effects.Click(_pressRight);
+                _earlySlot = _slot;
+                _earlyAt = Environment.TickCount64;
+                Note(_slot, "early");
+                Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
+            }
         }
         EndSecond();
         if (_mode == Mode.Button)

@@ -12,7 +12,9 @@ shows your fingers on it live; pick a zone or a finger count, then its action:
 - dictation button: mouse button 5 ("forward") held while the pad is held, to bind
   as the dictation trigger in Ciao and keep the middle button free for apps. After a
   hold it stays down at least 0.45 s, so Ciao never takes it for a short tap (which
-  would start hands-free dictation);
+  would start hands-free dictation). A quick double click on that zone (with the hold
+  trigger) does tap it: hands-free dictation on, and the next double click off. The
+  first click of the pair stays a normal click;
 - play/pause, next track, previous track;
 - play/pause for everything but the music app: pauses whatever plays (the agent's voice
   in T3 Code, a voice message in Telegram), else resumes what played last;
