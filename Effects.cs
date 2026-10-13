@@ -42,6 +42,35 @@ static class Effects
 
     public static void Key(ushort vk) => Worker.Post($"SendInput key 0x{vk:X}", () => SendKey(vk));
 
+    // Keys pressed in T3 Code: its window is brought forward first. A background app may
+    // not take the foreground, but one that just sent input may; an Alt tap before helps.
+    public static void T3Keys(string label, params ushort[] chord) => Worker.Post($"T3 Code: {label}", () =>
+    {
+        var window = System.Diagnostics.Process.GetProcesses()
+            .Where(p => p.ProcessName.StartsWith("T3 Code", StringComparison.OrdinalIgnoreCase) && p.MainWindowHandle != IntPtr.Zero)
+            .Select(p => p.MainWindowHandle).FirstOrDefault();
+        if (window == IntPtr.Zero)
+        {
+            Log.WriteNow($"T3 Code: {label}: no T3 Code window");
+            return;
+        }
+        if (GetForegroundWindow() != window)
+        {
+            SendKeyEvent(VK_MENU, false);
+            SendKeyEvent(VK_MENU, true);
+            SetForegroundWindow(window);
+            Thread.Sleep(80);
+        }
+        foreach (var vk in chord) SendKeyEvent(vk, false);
+        foreach (var vk in chord.Reverse()) SendKeyEvent(vk, true);
+    });
+
+    static void SendKeyEvent(ushort vk, bool up) => Send(new INPUT
+    {
+        Type = INPUT_KEYBOARD,
+        U = new InputUnion { Keyboard = new KEYBDINPUT { Vk = vk, Flags = up ? KEYEVENTF_KEYUP : 0, ExtraInfo = Tag } },
+    });
+
     // Play/pause or a track key for one app's media session (see Media.cs).
     public static void MediaKey(string app, GestureAction action) => Worker.Post($"media {action} to {app}", () =>
     {

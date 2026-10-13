@@ -11,7 +11,7 @@
 // or right strip of the pad, by thirds of its height. Each gets an action: the middle
 // button or mouse button 5 (held while the pad is; after a Hold trigger, for at least
 // MinHeldMs, so an app never takes a held gesture for a short tap), a media key, a volume step (repeating while held like
-// a held key), or nothing, left to Windows. With the Hold trigger the press is held back:
+// a held key), a T3 Code agent action (send, stop, voice), or nothing, left to Windows. With the Hold trigger the press is held back:
 // released before HoldMs it is replayed as the click it was, held longer it is the action.
 //
 // Second press: while an edge zone holds a mouse button, the pad's one button is
@@ -69,6 +69,9 @@ sealed class Gestures
     // The button Windows pressed for a Waiting gesture, once the hook has seen it.
     bool _pressSeen, _pressRight;
     readonly System.Threading.Timer _hold;
+
+    // T3 Code's media session id contains this (com.t3tools.t3code, or the exe name).
+    const string AgentVoiceApp = "t3";
 
     // Second press: the finger holding the edge, the button pressed by others (0 none,
     // 1 left, 2 right), and since when one finger presses (to wait for a second one).
@@ -303,6 +306,12 @@ sealed class Gestures
             return;
         }
         _mode = Mode.Key;
+        switch (_action)
+        {
+            case GestureAction.AgentSend: Effects.T3Keys("send", VK_RETURN); return;
+            case GestureAction.AgentStop: Effects.T3Keys("stop", VK_CONTROL, VK_MENU, VK_BACK); return;
+            case GestureAction.AgentVoice: Effects.MediaKey(AgentVoiceApp, GestureAction.PlayPause); return;
+        }
         ushort key = _action switch
         {
             GestureAction.PlayPause => VK_MEDIA_PLAY_PAUSE,

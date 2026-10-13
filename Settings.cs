@@ -9,7 +9,14 @@ namespace TrackpadClicks;
 
 // DictationButton: mouse button 5 ("forward", XButton2) held while the pad is, to bind as
 // a dictation trigger (in Ciao) and leave the middle button free for apps.
-enum GestureAction { Windows, MiddleClick, PlayPause, NextTrack, PrevTrack, VolumeUp, VolumeDown, Mute, DictationButton }
+// Agent*: for T3 Code. AgentSend presses Enter in its window (the composer's send),
+// AgentStop presses Ctrl+Alt+Backspace (bound to thread.stop in T3's keybindings.json),
+// AgentVoice toggles play/pause of T3 Code's media session (the agent's voice reply).
+enum GestureAction
+{
+    Windows, MiddleClick, PlayPause, NextTrack, PrevTrack, VolumeUp, VolumeDown, Mute, DictationButton,
+    AgentSend, AgentStop, AgentVoice,
+}
 
 // Click: the action goes on the press. Hold: a short click stays a normal click, the
 // action goes once the pad has been held down for HoldMs.

@@ -15,6 +15,9 @@ shows your fingers on it live; pick a zone or a finger count, then its action:
   would start hands-free dictation);
 - play/pause, next track, previous track;
 - volume up, volume down (a step; held, it repeats), mute;
+- for T3 Code: send (Enter in its window), stop the agent (Ctrl+Alt+Backspace, which
+  needs `{"key": "mod+alt+backspace", "command": "thread.stop"}` in T3's
+  `keybindings.json`), and play/pause the agent's voice reply (T3 Code's media session);
 - nothing — the click goes to Windows as usual.
 
 Each also has a trigger. **On click** acts on the press. **On hold** leaves a short
