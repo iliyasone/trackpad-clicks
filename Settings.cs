@@ -12,10 +12,12 @@ namespace TrackpadClicks;
 // Agent*: for T3 Code. AgentSend presses Enter in its window (the composer's send),
 // AgentStop presses Ctrl+Alt+Backspace (bound to thread.stop in T3's keybindings.json),
 // AgentVoice toggles play/pause of T3 Code's media session (the agent's voice reply).
+// OtherPlayPause: play/pause for every app but MediaApp (T3 Code, Telegram…): pauses what
+// plays, else resumes the one that played last.
 enum GestureAction
 {
     Windows, MiddleClick, PlayPause, NextTrack, PrevTrack, VolumeUp, VolumeDown, Mute, DictationButton,
-    AgentSend, AgentStop, AgentVoice,
+    AgentSend, AgentStop, AgentVoice, OtherPlayPause,
 }
 
 // Click: the action goes on the press. Hold: a short click stays a normal click, the
@@ -41,7 +43,7 @@ sealed record Config
         ["right-middle"] = new(GestureAction.PlayPause),
         ["right-bottom"] = new(GestureAction.VolumeDown),
         ["three"] = new(GestureAction.MiddleClick),
-        ["four"] = new(GestureAction.Windows),
+        ["four"] = new(GestureAction.OtherPlayPause),
     };
 
     // Width of the left and right edge strips, in percent of the pad's width.

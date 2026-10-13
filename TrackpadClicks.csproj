@@ -9,7 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>TrackpadClicks</AssemblyName>
     <RootNamespace>TrackpadClicks</RootNamespace>
-    <Version>0.4.1</Version>
+    <Version>0.4.2</Version>
     <InvariantGlobalization>true</InvariantGlobalization>
     <!-- WebView2Loader.dll goes inside the single-file exe too. -->
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>

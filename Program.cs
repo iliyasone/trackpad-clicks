@@ -48,6 +48,7 @@ static class Program
         Updater.Register();
         Updater.Clean();
         Worker.Start();
+        Media.Start();
         var gestures = new Gestures();
         RawInput.Start(gestures);
         MouseHook.Start(gestures);

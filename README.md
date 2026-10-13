@@ -14,6 +14,8 @@ shows your fingers on it live; pick a zone or a finger count, then its action:
   hold it stays down at least 0.45 s, so Ciao never takes it for a short tap (which
   would start hands-free dictation);
 - play/pause, next track, previous track;
+- play/pause for everything but the music app: pauses whatever plays (the agent's voice
+  in T3 Code, a voice message in Telegram), else resumes what played last;
 - volume up, volume down (a step; held, it repeats), mute;
 - for T3 Code: send (Enter in its window), stop the agent (Ctrl+Alt+Backspace, which
   needs `{"key": "mod+alt+backspace", "command": "thread.stop"}` in T3's
@@ -50,12 +52,12 @@ Defaults:
 | Click | What it does |
 | --- | --- |
 | 3 fingers | Middle mouse button |
-| 4 fingers | Left to Windows |
+| 4 fingers | Play/pause for everything but the music (T3 Code, Telegram…) |
 | 1 finger, left edge, top third, hold | Next track |
 | 1 finger, left edge, middle third, hold | Dictation button (push-to-talk in Ciao) |
 | 1 finger, left edge, bottom third, hold | Previous track |
 | 1 finger, right edge, top third | Volume up a step; hold to repeat |
-| 1 finger, right edge, middle third | Media play/pause |
+| 1 finger, right edge, middle third | Play/pause the music (Chrome) |
 | 1 finger, right edge, bottom third | Volume down a step; hold to repeat |
 
 Two-finger clicks are not configurable:

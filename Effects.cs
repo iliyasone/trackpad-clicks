@@ -77,6 +77,12 @@ static class Effects
         if (!Media.Send(app, action)) Log.WriteNow($"media {action}: nothing from \"{app}\" is playing");
     });
 
+    // Play/pause for every app but the music one (see Media.cs).
+    public static void OtherPlayPause(string except) => Worker.Post($"media play/pause, not {except}", () =>
+    {
+        if (!Media.ToggleOther(except)) Log.WriteNow($"media play/pause: nothing but \"{except}\" has played");
+    });
+
     // Released without travel: the held-back press becomes the click it was.
     public static void Click(bool right) => Worker.Post("SendInput click", () =>
     {

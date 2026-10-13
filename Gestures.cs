@@ -311,6 +311,7 @@ sealed class Gestures
             case GestureAction.AgentSend: Effects.T3Keys("send", VK_RETURN); return;
             case GestureAction.AgentStop: Effects.T3Keys("stop", VK_CONTROL, VK_MENU, VK_BACK); return;
             case GestureAction.AgentVoice: Effects.MediaKey(AgentVoiceApp, GestureAction.PlayPause); return;
+            case GestureAction.OtherPlayPause: Effects.OtherPlayPause(Settings.Current.MediaApp); return;
         }
         ushort key = _action switch
         {

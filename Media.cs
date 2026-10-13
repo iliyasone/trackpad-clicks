@@ -38,6 +38,55 @@ static class Media
         return true;
     }
 
-    static GlobalSystemMediaTransportControlsSessionManager Manager() =>
-        _manager ??= GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask().Result;
+    // Every app but `except` (empty: every app): pauses those playing, else resumes the
+    // one that played last. False when there is none.
+    public static bool ToggleOther(string except)
+    {
+        var sessions = Manager().GetSessions()
+            .Where(s => except.Length == 0 || !s.SourceAppUserModelId.Contains(except, StringComparison.OrdinalIgnoreCase)).ToList();
+        if (sessions.Count == 0) return false;
+        var playing = sessions.Where(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToList();
+        if (playing.Count > 0)
+        {
+            foreach (var s in playing) s.TryPauseAsync().AsTask().Wait(1000);
+            return true;
+        }
+        var last = sessions.FirstOrDefault(s => s.SourceAppUserModelId == _lastPlayed) ?? sessions[0];
+        last.TryPlayAsync().AsTask().Wait(1000);
+        return true;
+    }
+
+    // The app whose session last started playing, by app id; kept up by Windows' events.
+    static volatile string? _lastPlayed;
+    static readonly HashSet<GlobalSystemMediaTransportControlsSession> Watched = new();
+
+    static GlobalSystemMediaTransportControlsSessionManager Manager()
+    {
+        if (_manager != null) return _manager;
+        _manager = GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask().Result;
+        _manager.SessionsChanged += (m, _) => Watch(m);
+        Watch(_manager);
+        return _manager;
+    }
+
+    static void Watch(GlobalSystemMediaTransportControlsSessionManager manager)
+    {
+        lock (Watched)
+            foreach (var session in manager.GetSessions())
+            {
+                if (!Watched.Add(session)) continue;
+                session.PlaybackInfoChanged += (s, _) =>
+                {
+                    try
+                    {
+                        if (s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                            _lastPlayed = s.SourceAppUserModelId;
+                    }
+                    catch { }
+                };
+            }
+    }
+
+    // Started with the app, so the last one playing is known before the first gesture.
+    public static void Start() => Worker.Post("media sessions", () => Manager());
 }

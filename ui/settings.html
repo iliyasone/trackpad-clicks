@@ -278,12 +278,14 @@ const ICONS = {
   agentSend: '<path d="M4 12l16-8-6 16-2.5-6.5z"/><path d="M11.5 13.5L20 4"/>',
   agentStop: '<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/>',
   agentVoice: '<path d="M4 5h16v11H9l-5 4z"/><path d="M10 9v3M13 8v5M16 9.5v2"/>',
+  otherPlayPause: '<path d="M3 6l7 6-7 6z" fill="currentColor" stroke="none"/><path d="M13 6.5v11M17 6.5v11"/><path d="M20.5 5l-1 3M21.5 10h-1.5"/>',
 };
 const NAMES = {
   windows: 'Как обычно', middleClick: 'Средний клик', playPause: 'Плей / пауза', nextTrack: 'Следующий трек',
   prevTrack: 'Предыдущий трек', volumeUp: 'Громче', volumeDown: 'Тише', mute: 'Без звука',
   dictationButton: 'Диктовка (кнопка «Вперёд»)',
   agentSend: 'Отправить агенту', agentStop: 'Остановить агента', agentVoice: 'Голос агента: плей/пауза',
+  otherPlayPause: 'Плей / пауза: всё, кроме музыки',
 };
 const SLOTS = {
   'left-top': ['Левый край, сверху', 'Клик одним пальцем'], 'left-middle': ['Левый край, посередине', 'Клик одним пальцем'],
@@ -504,7 +506,7 @@ if (host) {
     'left-top': { action: 'nextTrack', trigger: 'hold' }, 'left-middle': { action: 'dictationButton', trigger: 'hold' },
     'left-bottom': { action: 'prevTrack', trigger: 'hold' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
     'right-middle': { action: 'playPause', trigger: 'click' }, 'right-bottom': { action: 'volumeDown', trigger: 'click' },
-    three: { action: 'middleClick', trigger: 'click' }, four: { action: 'windows', trigger: 'click' } } };
+    three: { action: 'middleClick', trigger: 'click' }, four: { action: 'otherPlayPause', trigger: 'click' } } };
   render();
   if (location.hash === '#test') $('test-toggle').click();
   let t = 0;
