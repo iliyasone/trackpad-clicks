@@ -404,8 +404,8 @@ if (host) {
 } else {
   // Opened in a plain browser: a demo with a finger walking along the right edge.
   config = { leftEdge: 30, rightEdge: 20, holdMs: 400, gestures: {
-    'left-top': { action: 'nextTrack', trigger: 'click' }, 'left-middle': { action: 'middleClick', trigger: 'hold' },
-    'left-bottom': { action: 'prevTrack', trigger: 'click' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
+    'left-top': { action: 'nextTrack', trigger: 'hold' }, 'left-middle': { action: 'middleClick', trigger: 'hold' },
+    'left-bottom': { action: 'prevTrack', trigger: 'hold' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
     'right-middle': { action: 'playPause', trigger: 'click' }, 'right-bottom': { action: 'volumeDown', trigger: 'click' },
     three: { action: 'middleClick', trigger: 'click' }, four: { action: 'windows', trigger: 'click' } } };
   render();

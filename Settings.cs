@@ -24,9 +24,10 @@ sealed record Config
 
     public Dictionary<string, Binding> Gestures { get; init; } = new()
     {
-        ["left-top"] = new(GestureAction.NextTrack),
-        ["left-middle"] = new(GestureAction.MiddleClick),
-        ["left-bottom"] = new(GestureAction.PrevTrack),
+        // The wide left strip acts only on a hold, so a short click there stays a click.
+        ["left-top"] = new(GestureAction.NextTrack, Trigger.Hold),
+        ["left-middle"] = new(GestureAction.MiddleClick, Trigger.Hold),
+        ["left-bottom"] = new(GestureAction.PrevTrack, Trigger.Hold),
         ["right-top"] = new(GestureAction.VolumeUp),
         ["right-middle"] = new(GestureAction.PlayPause),
         ["right-bottom"] = new(GestureAction.VolumeDown),

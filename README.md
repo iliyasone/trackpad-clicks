@@ -31,9 +31,9 @@ Defaults:
 | --- | --- |
 | 3 fingers | Middle mouse button |
 | 4 fingers | Left to Windows |
-| 1 finger, left edge, top third | Next track |
-| 1 finger, left edge, middle third | Middle mouse button |
-| 1 finger, left edge, bottom third | Previous track |
+| 1 finger, left edge, top third, hold | Next track |
+| 1 finger, left edge, middle third, hold | Middle mouse button (push-to-talk in Ciao) |
+| 1 finger, left edge, bottom third, hold | Previous track |
 | 1 finger, right edge, top third | Volume up a step; hold to repeat |
 | 1 finger, right edge, middle third | Media play/pause |
 | 1 finger, right edge, bottom third | Volume down a step; hold to repeat |
