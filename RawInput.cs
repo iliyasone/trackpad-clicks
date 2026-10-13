@@ -10,6 +10,8 @@ sealed class RawInput : NativeWindow
     // When the thread started on the current message, 0 when idle; watched by the tray.
     public static long BusySince;
     public static volatile string At = "idle";
+    // Keep each report's bytes on its pad, for the settings window's test.
+    public static volatile bool Capture;
 
     readonly Gestures _gestures;
     readonly Dictionary<IntPtr, Pad?> _pads = new();
@@ -76,10 +78,17 @@ sealed class RawInput : NativeWindow
                 if (!Parse(pad, report, reportSize, out var frame)) continue;
                 if (_debug && frame.Button != pad.Button)
                     Log.Write($"dev {header.Device} {(frame.Button ? "down" : "up")} {frame.Contacts} fingers, landed {pad.LandingsText} ms before the last");
+                byte[]? raw = null;
+                if (Capture)
+                {
+                    raw = new byte[reportSize];
+                    Marshal.Copy(report, raw, 0, (int)reportSize);
+                }
                 At = "gestures";
                 lock (_gestures.Sync)
                 {
                     pad.Apply(frame);
+                    pad.Raw = raw;
                     _gestures.OnReport(pad, frame.Button);
                 }
             }

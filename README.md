@@ -16,8 +16,13 @@ shows your fingers on it live; pick a zone or a finger count, then its action:
 Each also has a trigger. **On click** acts on the press. **On hold** leaves a short
 click a normal click and acts only once the pad is held down for the hold time
 (400 ms by default). The pad's driver reports no finger pressure, so a hold is the
-way to tell a deliberate press from a click. The edge width (20% of the pad by
-default) and the hold time are set there too. Settings are saved at once to
+way to tell a deliberate press from a click. The width of each edge (by default 30%
+of the pad on the left, 20% on the right) and the hold time are set there too.
+
+**Тест** in the window's header shows what the program sees: the button, the finger
+count, the last gestures and what they did, and the raw bytes of each report, with the
+bytes that change flashing — press harder without moving a finger to see whether
+anything in the report follows the force. Settings are saved at once to
 `%APPDATA%\TrackpadClicks\config.json`.
 
 Defaults:

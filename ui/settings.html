@@ -109,6 +109,30 @@
   .foot button { border: 0; background: none; color: var(--accent); cursor: pointer; padding: 0; }
   .saved { opacity: 0; transition: opacity .3s; }
   .saved.show { opacity: 1; }
+  .pill { border: 0; border-radius: 9px; padding: 6px 12px; background: var(--panel-2); cursor: pointer; }
+  .pill.on { background: var(--accent); color: #fff; }
+  .test { display: none; }
+  .testing .test { display: flex; }
+  .testing .settings { display: none; }
+  .test, .settings { flex-direction: column; gap: 14px; }
+  .settings { display: flex; }
+  .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat { background: var(--panel-2); border-radius: 10px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat span { color: var(--muted); font-size: 12px; }
+  .stat.hot { background: var(--accent); color: #fff; }
+  .stat.hot span { color: rgba(255,255,255,.8); }
+  .hex { font: 11.5px/1.7 "Cascadia Mono", Consolas, monospace; display: flex; flex-wrap: wrap; gap: 0 5px;
+    background: var(--panel-2); border-radius: 10px; padding: 10px 12px; min-height: 60px; }
+  .hex i { font-style: normal; color: var(--muted); border-radius: 3px; padding: 0 1px; transition: background 1s, color 1s; }
+  .hex i.changed { background: #ff9f0a; color: #000; transition: none; }
+  .hex i.still { color: var(--text); }
+  .events { display: flex; flex-direction: column; gap: 6px; }
+  .event { display: flex; align-items: center; gap: 10px; background: var(--panel-2); border-radius: 10px; padding: 8px 10px; font-size: 13px; }
+  .event svg { width: 18px; height: 18px; flex: none; }
+  .event .when { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .event.fresh { box-shadow: inset 0 0 0 2px var(--accent); }
+  .empty { color: var(--muted); font-size: 13px; }
   .disabled .pad, .disabled .cards { opacity: .45; filter: grayscale(.6); }
 </style>
 </head>
@@ -121,6 +145,7 @@
       <div class="sub">Нажми на зону или карточку, чтобы выбрать, что делает клик</div>
     </div>
     <div class="grow"></div>
+    <button class="pill" id="test-toggle">Тест</button>
     <div class="switch on" id="enabled"><span>Жесты включены</span><div class="track"></div></div>
   </header>
   <main>
@@ -135,6 +160,7 @@
       <div class="cards" id="cards"></div>
     </section>
     <aside>
+     <div class="settings">
       <div>
         <h2 id="title"></h2>
         <div class="what" id="what"></div>
@@ -153,13 +179,38 @@
       </div>
       <div class="divider"></div>
       <div class="slider">
-        <span>Ширина краёв</span><output id="edge-out"></output>
-        <input type="range" id="edge" min="8" max="35" step="1">
+        <span>Левый край</span><output id="left-out"></output>
+        <input type="range" id="left-edge" min="5" max="45" step="1">
+      </div>
+      <div class="slider">
+        <span>Правый край</span><output id="right-out"></output>
+        <input type="range" id="right-edge" min="5" max="45" step="1">
       </div>
       <div class="slider">
         <span>Время удержания</span><output id="hold-out"></output>
         <input type="range" id="hold" min="200" max="1200" step="50">
       </div>
+     </div>
+     <div class="test">
+      <div>
+        <h2>Тест</h2>
+        <div class="what">Что программа видит на тачпаде прямо сейчас</div>
+      </div>
+      <div class="stats">
+        <div class="stat" id="t-button"><b>—</b><span>кнопка</span></div>
+        <div class="stat" id="t-contacts"><b>0</b><span>пальцев</span></div>
+      </div>
+      <div>
+        <div class="label">Последние жесты</div>
+        <div class="events" id="t-events"><div class="empty">Щёлкни по тачпаду — здесь появится, что сработало.</div></div>
+      </div>
+      <div>
+        <div class="label">Сильный клик</div>
+        <div class="hint" style="margin:0 0 8px">Положи палец, нажми до щелчка и дави сильнее, не двигая палец. Байты отчёта,
+          которые меняются, мигают оранжевым. Если что-то мигает только от силы — силу можно поймать.</div>
+        <div class="hex" id="t-hex"><span class="empty">Коснись тачпада…</span></div>
+      </div>
+     </div>
       <div class="foot">
         <button id="log">Открыть лог</button>
         <span class="saved" id="saved">Сохранено ✓</span>
@@ -201,7 +252,8 @@ let config = null, enabled = true, selected = 'right-middle';
 function render() {
   if (!config) return;
   const pad = $('pad');
-  $('left').style.width = $('right').style.width = config.edgeWidth + '%';
+  $('left').style.width = config.leftEdge + '%';
+  $('right').style.width = config.rightEdge + '%';
   pad.style.setProperty('--hold', config.holdMs + 'ms');
   for (const side of ['left', 'right']) {
     $(side).innerHTML = ['top', 'middle', 'bottom'].map(h => zoneHtml(`${side}-${h}`)).join('');
@@ -224,7 +276,8 @@ function render() {
   $('trigger-hint').textContent = b.trigger === 'hold'
     ? `Короткий клик остаётся обычным кликом. Действие — если подержать нажатым ${config.holdMs} мс.`
     : 'Действие сразу при нажатии; обычного клика в этой зоне нет.';
-  $('edge').value = config.edgeWidth; $('edge-out').textContent = config.edgeWidth + '%';
+  $('left-edge').value = config.leftEdge; $('left-out').textContent = config.leftEdge + '%';
+  $('right-edge').value = config.rightEdge; $('right-out').textContent = config.rightEdge + '%';
   $('hold').value = config.holdMs; $('hold-out').textContent = config.holdMs + ' мс';
   $('enabled').classList.toggle('on', enabled);
   $('app').classList.toggle('disabled', !enabled);
@@ -263,15 +316,24 @@ document.addEventListener('click', e => {
 });
 $('enabled').onclick = () => { enabled = !enabled; render(); send({ type: 'enabled', value: enabled }); };
 $('log').onclick = () => send({ type: 'log' });
-$('edge').oninput = e => { config.edgeWidth = +e.target.value; render(); };
+$('left-edge').oninput = e => { config.leftEdge = +e.target.value; render(); };
+$('right-edge').oninput = e => { config.rightEdge = +e.target.value; render(); };
 $('hold').oninput = e => { config.holdMs = +e.target.value; render(); };
-$('edge').onchange = $('hold').onchange = () => change(() => {});
+$('left-edge').onchange = $('right-edge').onchange = $('hold').onchange = () => change(() => {});
+let testing = false;
+$('test-toggle').onclick = () => {
+  testing = !testing;
+  $('test-toggle').classList.toggle('on', testing);
+  $('app').classList.toggle('testing', testing);
+  send({ type: 'test', value: testing });
+};
 
 // ---- Live fingers.
 let live = null;
 function paintLive() {
   const pad = $('pad');
   if (!live) return;
+  if (testing) paintTest();
   if (Math.abs(live.aspect - parseFloat(pad.style.aspectRatio || 1.503)) > .01) pad.style.aspectRatio = live.aspect;
   pad.classList.toggle('pressed', live.pressed);
   const dots = pad.querySelectorAll('.finger');
@@ -289,6 +351,49 @@ function paintLive() {
   });
 }
 
+// ---- Test panel.
+let lastHex = [], lastSeq = 0;
+const seen = {};
+function paintTest() {
+  $('t-button').classList.toggle('hot', live.pressed);
+  $('t-button').querySelector('b').textContent = live.pressed ? 'нажата' : 'отпущена';
+  $('t-contacts').querySelector('b').textContent = live.contacts;
+  const events = live.events || [];
+  const top = events.length ? events[events.length - 1].seq : 0;
+  if (top !== lastSeq) {
+    const now = Date.now();
+    for (const ev of events) seen[ev.seq] = seen[ev.seq] || now;
+    $('t-events').innerHTML = events.slice().reverse().map(ev => {
+      const where = SLOTS[ev.slot][0];
+      const text = ev.what === 'action' ? `${where} → ${NAMES[ev.action]}`
+        : ev.what === 'early' ? `${where} → отпущено раньше, обычный клик`
+        : `${where} → оставлено Windows`;
+      const sym = ev.what === 'action' ? ev.action : 'windows';
+      return `<div class="event ${ev.seq === top ? 'fresh' : ''}" data-seq="${ev.seq}">${icon(sym)}<span>${text}</span><span class="when"></span></div>`;
+    }).join('') || $('t-events').innerHTML;
+    lastSeq = top;
+  }
+  document.querySelectorAll('#t-events .event').forEach(e => {
+    const ago = Math.round((Date.now() - seen[e.dataset.seq]) / 1000);
+    e.querySelector('.when').textContent = ago < 2 ? 'сейчас' : ago + ' с назад';
+  });
+  if (live.raw) {
+    const bytes = live.raw.match(/../g);
+    const box = $('t-hex');
+    if (box.children.length !== bytes.length || box.querySelector('.empty'))
+      box.innerHTML = bytes.map(() => '<i></i>').join('');
+    bytes.forEach((b, i) => {
+      const cell = box.children[i];
+      if (cell.textContent !== b) cell.textContent = b;
+      const changed = lastHex.length === bytes.length && lastHex[i] !== b;
+      if (changed) { cell.classList.remove('changed'); void cell.offsetWidth; cell.classList.add('changed'); }
+      else if (cell.classList.contains('changed')) setTimeout(() => cell.classList.remove('changed'), 0);
+      cell.classList.toggle('still', b !== '00');
+    });
+    lastHex = bytes;
+  }
+}
+
 if (host) {
   host.addEventListener('message', e => {
     const m = e.data;
@@ -298,19 +403,22 @@ if (host) {
   send({ type: 'ready' });
 } else {
   // Opened in a plain browser: a demo with a finger walking along the right edge.
-  config = { edgeWidth: 20, holdMs: 400, gestures: {
+  config = { leftEdge: 30, rightEdge: 20, holdMs: 400, gestures: {
     'left-top': { action: 'nextTrack', trigger: 'click' }, 'left-middle': { action: 'middleClick', trigger: 'hold' },
     'left-bottom': { action: 'prevTrack', trigger: 'click' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
     'right-middle': { action: 'playPause', trigger: 'click' }, 'right-bottom': { action: 'volumeDown', trigger: 'click' },
     three: { action: 'middleClick', trigger: 'click' }, four: { action: 'windows', trigger: 'click' } } };
   render();
+  if (location.hash === '#test') $('test-toggle').click();
   let t = 0;
   setInterval(() => {
     t += 0.02;
     const y = 0.5 + 0.42 * Math.sin(t);
     const under = 'right-' + (y < 1 / 3 ? 'top' : y > 2 / 3 ? 'bottom' : 'middle');
     const pressed = Math.sin(t * 3) > 0.9;
-    live = { aspect: 1.503, fingers: [[0.9, y], [0.45, 0.6]], pressed, active: pressed ? under : null, waiting: false, under };
+    live = { aspect: 1.503, fingers: [[0.9, y], [0.45, 0.6]], pressed, active: pressed ? under : null, waiting: false, under,
+      contacts: 2, events: [{ seq: 1, slot: 'left-middle', what: 'action', action: 'middleClick' }, { seq: 2, slot: 'right-top', what: 'early', action: 'volumeUp' }],
+      raw: '05' + Math.round(y * 255).toString(16).padStart(2, '0') + '1A0000' + (pressed ? '01' : '00') + '3F2C00000000000000000000' };
     paintLive();
   }, 33);
 }

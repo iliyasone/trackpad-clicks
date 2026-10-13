@@ -9,7 +9,8 @@ namespace TrackpadClicks;
 // The settings window: a WebView2 page (ui/settings.html, embedded in the exe) that
 // draws the trackpad, its gesture zones and the fingers on it live. Runs on the UI
 // thread. Messages, as JSON:
-//   page -> app: {type:"ready"}, {type:"config", config}, {type:"enabled", value}, {type:"log"}
+//   page -> app: {type:"ready"}, {type:"config", config}, {type:"enabled", value}, {type:"log"},
+//                {type:"test", value} (the report bytes in "live" while on)
 //   app -> page: {type:"state", config, enabled, actions}, {type:"live", ...Live}
 sealed class SettingsWindow : Form
 {
@@ -37,7 +38,11 @@ sealed class SettingsWindow : Form
             DwmSetWindowAttribute(Handle, 20, ref on, sizeof(int)); // DWMWA_USE_IMMERSIVE_DARK_MODE
         };
         Load += async (_, _) => await Start();
-        FormClosed += (_, _) => _live.Stop();
+        FormClosed += (_, _) =>
+        {
+            _live.Stop();
+            RawInput.Capture = false;
+        };
     }
 
     async Task Start()
@@ -83,6 +88,9 @@ sealed class SettingsWindow : Form
                 break;
             case "enabled":
                 _setEnabled((bool)message!["value"]!);
+                break;
+            case "test":
+                RawInput.Capture = (bool)message!["value"]!;
                 break;
             case "log":
                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Log.Path) { UseShellExecute = true });

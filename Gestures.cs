@@ -123,6 +123,7 @@ sealed class Gestures
         }
         else if (button && !pad.Button && pad.Contacts >= 3 && _mode == Mode.None)
         {
+            Note(pad.Contacts >= 4 ? "four" : "three", "windows");
             Log.Write($"{pad.Contacts} fingers, counted {ClickFingers(pad)} (landed {pad.LandingsText} ms before the last), left to Windows");
         }
         else if (!button && pad.Button && pad == _modePad)
@@ -208,8 +209,7 @@ sealed class Gestures
     {
         if (pad.YFingers != 1) return null;
         double x = (pad.Xs[0] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
-        double edge = config.EdgeWidth / 100.0;
-        string side = x <= edge ? "left" : x >= 1 - edge ? "right" : "";
+        string side = x <= config.LeftEdge / 100.0 ? "left" : x >= 1 - config.RightEdge / 100.0 ? "right" : "";
         if (side == "") return null;
         // Y grows downward.
         double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
@@ -238,6 +238,7 @@ sealed class Gestures
     {
         string fingers = _slot is "three" or "four" ? $" (landed {_modePad?.LandingsText} ms before the last)" : "";
         Log.Write($"{_slot}: {_action}{fingers}");
+        Note(_slot, "action");
         if (_action == GestureAction.MiddleClick)
         {
             _mode = Mode.Middle;
@@ -269,6 +270,7 @@ sealed class Gestures
             // Let go before HoldMs: an ordinary click.
             _hold.Change(Timeout.Infinite, Timeout.Infinite);
             if (_pressSeen) Effects.Click(_pressRight);
+            Note(_slot, "early");
             Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
         }
         if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
@@ -278,8 +280,21 @@ sealed class Gestures
         _modePad = null;
     }
 
-    // ---- For the settings window: the pad touched last, its fingers, and the gesture
-    // pressed on it.
+    // ---- For the settings window: the pad touched last, its fingers, the gesture
+    // pressed on it, and the last gestures.
+
+    readonly List<GestureEvent> _events = new();
+    int _eventSeq;
+
+    // What: "action" (the gesture fired), "early" (a hold let go early: a normal click),
+    // "windows" (a 3+ finger click left to Windows).
+    void Note(string slot, string what)
+    {
+        var action = Settings.Current.For(slot).Action;
+        _events.Add(new GestureEvent(++_eventSeq, slot, what, action));
+        if (_events.Count > 8) _events.RemoveAt(0);
+    }
+
     public Live? Snapshot()
     {
         var pad = Pads.Where(p => p.XMax > 0).MaxBy(p => p.LastReport);
@@ -290,7 +305,8 @@ sealed class Gestures
             fingers[i] = new[] { (pad.Xs[i] - pad.XMin) / w, (pad.Ys[i] - pad.YMin) / h };
         string? active = pad == _modePad ? _slot : null;
         return new Live(w / h, fingers, pad.Button, active, _mode == Mode.Waiting,
-            pad.Contacts == 1 ? EdgeSlot(pad, Settings.Current) : null);
+            pad.Contacts == 1 ? EdgeSlot(pad, Settings.Current) : null, pad.Contacts,
+            _events.ToArray(), pad.Raw == null ? null : Convert.ToHexString(pad.Raw));
     }
 
     // ---- Two fingers.
@@ -435,5 +451,9 @@ sealed class Gestures
 
 // One frame of the live view: pad width/height, fingers as 0..1 positions, whether it is
 // pressed, the gesture slot pressed (Waiting: still within its hold), the zone under a
-// lone finger.
-sealed record Live(double Aspect, double[][] Fingers, bool Pressed, string? Active, bool Waiting, string? Under);
+// lone finger, the contact count, the last gestures, and with the test on the report's
+// bytes in hex.
+sealed record Live(double Aspect, double[][] Fingers, bool Pressed, string? Active, bool Waiting, string? Under,
+    int Contacts, GestureEvent[] Events, string? Raw);
+
+sealed record GestureEvent(int Seq, string Slot, string What, GestureAction Action);

@@ -22,6 +22,8 @@ sealed class Pad
     public readonly double[] Xs = new double[MaxFingers], Ys = new double[MaxFingers];
     // When each finger now touching landed, by contact ID.
     public readonly Dictionary<uint, long> Landed = new();
+    // The last report's bytes, kept only while the settings window's test is on.
+    public byte[]? Raw;
     // Where each finger was when it last moved, and when that was (0: not since landing).
     readonly Dictionary<uint, (double X, double Y, long At)> _moved = new();
     readonly List<uint> _lifted = new();

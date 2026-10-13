@@ -34,8 +34,9 @@ sealed record Config
         ["four"] = new(GestureAction.Windows),
     };
 
-    // Width of each edge strip, in percent of the pad's width.
-    public int EdgeWidth { get; init; } = 20;
+    // Width of the left and right edge strips, in percent of the pad's width.
+    public int LeftEdge { get; init; } = 30;
+    public int RightEdge { get; init; } = 20;
     public int HoldMs { get; init; } = 400;
 
     public Binding For(string slot) => Gestures.TryGetValue(slot, out var b) ? b : new(GestureAction.Windows);
@@ -49,7 +50,8 @@ sealed record Config
         return this with
         {
             Gestures = gestures,
-            EdgeWidth = Math.Clamp(EdgeWidth, 5, 40),
+            LeftEdge = Math.Clamp(LeftEdge, 5, 45),
+            RightEdge = Math.Clamp(RightEdge, 5, 45),
             HoldMs = Math.Clamp(HoldMs, 150, 2000),
         };
     }
