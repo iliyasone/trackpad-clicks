@@ -8,7 +8,7 @@
 //   UI          — the tray icon, the settings window, and the watch over the other two.
 // Every mouse event in the system waits for the hook, so a call that hangs must never
 // run on it. A stuck raw input or effects thread only switches gestures off, shown in
-// the tray.
+// the tray, until it moves on.
 
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
@@ -153,12 +153,23 @@ sealed class Tray : ApplicationContext
         if (_window is { IsDisposed: false }) _window.SendState();
     }
 
-    // A thread busy on one item for too long is stuck: gestures off, say so.
+    // A thread busy on one item for too long is stuck: gestures off, say so. Once it moves
+    // on (a slow disk or a busy start-up, not a real hang), gestures come back by themselves.
     void Watch()
     {
-        if (_stuck != null) return;
-        _stuck = Stuck(ref Worker.BusySince, Worker.At, "действия")
-                 ?? Stuck(ref RawInput.BusySince, RawInput.At, "чтение трекпада");
+        string? stuck = Stuck(ref Worker.BusySince, Worker.At, "действия")
+                        ?? Stuck(ref RawInput.BusySince, RawInput.At, "чтение трекпада");
+        if (_stuck != null)
+        {
+            if (stuck != null) return;
+            _stuck = null;
+            lock (_gestures.Sync) _gestures.Reset();
+            Gestures.Enabled = _enabled.Checked;
+            Log.WriteNow("unstuck; gestures back on");
+            Show();
+            return;
+        }
+        _stuck = stuck;
         if (_stuck == null) return;
         Gestures.Enabled = false;
         Log.WriteNow($"stuck: {_stuck}; gestures off");

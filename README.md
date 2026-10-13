@@ -104,7 +104,8 @@ create a Task Scheduler task with an *At log on* trigger, running as that user w
 
 The tray icon (a small trackpad) shows the state and has a menu: turn gestures on or
 off, open the log, restart, exit. The icon is white when gestures are on, grey when
-off, and red when TrackpadClicks got stuck and switched itself off (see below).
+off, and red when TrackpadClicks got stuck and switched itself off until the stuck thread moves on
+(see below).
 
 `scripts/deploy.sh` builds and installs to `C:\TrackpadClicks` on a remote PC over
 SSH. It is specific to one setup: the PC is reached as `ssh wsl` then `ssh windows`,
