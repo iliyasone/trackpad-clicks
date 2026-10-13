@@ -8,7 +8,11 @@ The one-finger edge clicks and the three- and four-finger clicks are set up in t
 settings window (click the tray icon). It draws the pad with its six edge zones and
 shows your fingers on it live; pick a zone or a finger count, then its action:
 
-- middle mouse button (held while the pad is held; e.g. push-to-talk voice input);
+- middle mouse button, held while the pad is held;
+- dictation button: mouse button 5 ("forward") held while the pad is held, to bind
+  as the dictation trigger in Ciao and keep the middle button free for apps. After a
+  hold it stays down at least 0.45 s, so Ciao never takes it for a short tap (which
+  would start hands-free dictation);
 - play/pause, next track, previous track;
 - volume up, volume down (a step; held, it repeats), mute;
 - nothing — the click goes to Windows as usual.
@@ -38,7 +42,7 @@ Defaults:
 | 3 fingers | Middle mouse button |
 | 4 fingers | Left to Windows |
 | 1 finger, left edge, top third, hold | Next track |
-| 1 finger, left edge, middle third, hold | Middle mouse button (push-to-talk in Ciao) |
+| 1 finger, left edge, middle third, hold | Dictation button (push-to-talk in Ciao) |
 | 1 finger, left edge, bottom third, hold | Previous track |
 | 1 finger, right edge, top third | Volume up a step; hold to repeat |
 | 1 finger, right edge, middle third | Media play/pause |

@@ -23,7 +23,8 @@ static class Updater
     public static string Current =>
         typeof(Updater).Assembly.GetName().Version is Version v ? $"{v.Major}.{v.Minor}.{v.Build}" : "?";
 
-    public sealed record Pending(string Version, string Notes, string? Driver);
+    // RestartCiao: the update changes what Ciao should listen to; restart it to reread its settings.
+    public sealed record Pending(string Version, string Notes, string? Driver, bool RestartCiao = false);
 
     // The staged update, if there is one that is not applied yet.
     public static Pending? Check()
@@ -103,6 +104,13 @@ static class Updater
         int me = Environment.ProcessId;
         foreach (var other in Process.GetProcessesByName("TrackpadClicks"))
             try { if (other.Id != me) other.Kill(); } catch { }
+        if (pending.RestartCiao)
+        {
+            string ciao = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Programs", "ciao", "Ciao.exe");
+            foreach (var p in Process.GetProcessesByName("Ciao"))
+                try { p.Kill(true); p.WaitForExit(3000); } catch { }
+            if (File.Exists(ciao)) Process.Start(new ProcessStartInfo(ciao) { UseShellExecute = true });
+        }
         Process.Start(installed, $"--replace {me}");
         Environment.Exit(0);
         return null;

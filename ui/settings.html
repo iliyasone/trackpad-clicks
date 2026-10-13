@@ -264,10 +264,12 @@ const ICONS = {
   volumeUp: speaker + '<path d="M15.5 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11"/>',
   volumeDown: speaker + '<path d="M15.5 9a4 4 0 010 6"/>',
   mute: speaker + '<path d="M16 9.5l5 5M21 9.5l-5 5"/>',
+  dictationButton: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21"/>',
 };
 const NAMES = {
   windows: 'Как обычно', middleClick: 'Средний клик', playPause: 'Плей / пауза', nextTrack: 'Следующий трек',
   prevTrack: 'Предыдущий трек', volumeUp: 'Громче', volumeDown: 'Тише', mute: 'Без звука',
+  dictationButton: 'Диктовка (кнопка «Вперёд»)',
 };
 const SLOTS = {
   'left-top': ['Левый край, сверху', 'Клик одним пальцем'], 'left-middle': ['Левый край, посередине', 'Клик одним пальцем'],
@@ -477,7 +479,7 @@ if (host) {
   version = '0.3.0';
   update = { version: '0.3.0', notes: 'Второе нажатие по силе пальца, правый клик двумя пальцами врозь', driver: '2.2' };
   config = { leftEdge: 30, rightEdge: 20, holdMs: 400, secondPress: true, pressForce: 70, gestures: {
-    'left-top': { action: 'nextTrack', trigger: 'hold' }, 'left-middle': { action: 'middleClick', trigger: 'hold' },
+    'left-top': { action: 'nextTrack', trigger: 'hold' }, 'left-middle': { action: 'dictationButton', trigger: 'hold' },
     'left-bottom': { action: 'prevTrack', trigger: 'hold' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
     'right-middle': { action: 'playPause', trigger: 'click' }, 'right-bottom': { action: 'volumeDown', trigger: 'click' },
     three: { action: 'middleClick', trigger: 'click' }, four: { action: 'windows', trigger: 'click' } } };

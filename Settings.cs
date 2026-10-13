@@ -7,7 +7,9 @@ namespace TrackpadClicks;
 // %APPDATA%\TrackpadClicks\config.json. A Config is never changed once published:
 // the window sends a whole new one, and Gestures reads Settings.Current under its lock.
 
-enum GestureAction { Windows, MiddleClick, PlayPause, NextTrack, PrevTrack, VolumeUp, VolumeDown, Mute }
+// DictationButton: mouse button 5 ("forward", XButton2) held while the pad is, to bind as
+// a dictation trigger (in Ciao) and leave the middle button free for apps.
+enum GestureAction { Windows, MiddleClick, PlayPause, NextTrack, PrevTrack, VolumeUp, VolumeDown, Mute, DictationButton }
 
 // Click: the action goes on the press. Hold: a short click stays a normal click, the
 // action goes once the pad has been held down for HoldMs.
@@ -26,7 +28,7 @@ sealed record Config
     {
         // The wide left strip acts only on a hold, so a short click there stays a click.
         ["left-top"] = new(GestureAction.NextTrack, Trigger.Hold),
-        ["left-middle"] = new(GestureAction.MiddleClick, Trigger.Hold),
+        ["left-middle"] = new(GestureAction.DictationButton, Trigger.Hold),
         ["left-bottom"] = new(GestureAction.PrevTrack, Trigger.Hold),
         ["right-top"] = new(GestureAction.VolumeUp),
         ["right-middle"] = new(GestureAction.PlayPause),

@@ -9,11 +9,12 @@
 // What a click does comes from the settings (Settings.cs): a click with 3 or with 4
 // fingers, and a click with 1 finger (a thumb, say) in one of six edge zones — the left
 // or right strip of the pad, by thirds of its height. Each gets an action: the middle
-// button (held while the pad is), a media key, a volume step (repeating while held like
+// button or mouse button 5 (held while the pad is; after a Hold trigger, for at least
+// MinHeldMs, so an app never takes a held gesture for a short tap), a media key, a volume step (repeating while held like
 // a held key), or nothing, left to Windows. With the Hold trigger the press is held back:
 // released before HoldMs it is replayed as the click it was, held longer it is the action.
 //
-// Second press: while an edge zone holds the middle button, the pad's one button is
+// Second press: while an edge zone holds a mouse button, the pad's one button is
 // already down, so another finger pressing gives no new click. With driver 2.2+ each
 // finger reports its pressure: another finger pressing past PressForce presses the left
 // button (two fingers: the right one) until it eases off to 60% of that.
@@ -58,8 +59,8 @@ sealed class Gestures
     // Shell windows that keep their own clicks.
     static readonly HashSet<string> Unmovable = new() { "Progman", "WorkerW", "Shell_TrayWnd", "Shell_SecondaryTrayWnd" };
 
-    // Waiting: a Hold gesture pressed, not yet held long enough.
-    enum Mode { None, Waiting, Middle, Key }
+    // Waiting: a Hold gesture pressed, not yet held long enough. Button: a mouse button held.
+    enum Mode { None, Waiting, Button, Key }
     Mode _mode;
     Pad? _modePad;
     string _slot = "";
@@ -75,6 +76,15 @@ sealed class Gestures
     int _second;
     long _secondSince;
     const long SecondPairMs = 60;
+
+    // The mouse button a Button gesture holds, when it went down, and whether its up is
+    // put off to MinHeldMs. Ciao takes a press under 0.35 s for a tap that starts
+    // hands-free dictation; a gesture that needed a hold must never look like one.
+    uint _buttonDown, _buttonUp, _buttonData;
+    long _buttonAt;
+    bool _buttonHeld, _upPending;
+    readonly System.Threading.Timer _buttonRelease;
+    const long MinHeldMs = 450;
 
     // The volume key held, or 0.
     ushort _repeatKey;
@@ -102,6 +112,15 @@ sealed class Gestures
             lock (Sync)
                 if (_repeatKey != 0 && Enabled) Effects.Key(_repeatKey);
         });
+        _buttonRelease = new System.Threading.Timer(_ =>
+        {
+            lock (Sync)
+                if (_upPending)
+                {
+                    _upPending = false;
+                    Effects.Mouse(_buttonUp, _buttonData);
+                }
+        });
         _hold = new System.Threading.Timer(_ =>
         {
             lock (Sync)
@@ -115,7 +134,12 @@ sealed class Gestures
         _repeat.Change(Timeout.Infinite, Timeout.Infinite);
         _hold.Change(Timeout.Infinite, Timeout.Infinite);
         EndSecond();
-        if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
+        if (_mode == Mode.Button || _upPending)
+        {
+            _buttonRelease.Change(Timeout.Infinite, Timeout.Infinite);
+            _upPending = false;
+            Effects.Mouse(_buttonUp, _buttonData);
+        }
         _mode = Mode.None;
         _modePad = null;
         _repeatKey = 0;
@@ -148,7 +172,7 @@ sealed class Gestures
             End();
         }
         pad.Button = button;
-        if (_mode == Mode.Middle && pad == _modePad && _slot.Contains('-')) SecondPress(pad);
+        if (_mode == Mode.Button && pad == _modePad && _slot.Contains('-')) SecondPress(pad);
 
         if (_drag != Drag.None && pad == _dragPad)
         {
@@ -260,10 +284,22 @@ sealed class Gestures
         string fingers = _slot is "three" or "four" ? $" (landed {_modePad?.LandingsText} ms before the last)" : "";
         Log.Write($"{_slot}: {_action}{fingers}");
         Note(_slot, "action");
-        if (_action == GestureAction.MiddleClick)
+        if (_action is GestureAction.MiddleClick or GestureAction.DictationButton)
         {
-            _mode = Mode.Middle;
-            Effects.Mouse(MOUSEEVENTF_MIDDLEDOWN);
+            _mode = Mode.Button;
+            bool x = _action == GestureAction.DictationButton;
+            uint down = x ? MOUSEEVENTF_XDOWN : MOUSEEVENTF_MIDDLEDOWN;
+            // The same button still down from a press let go too soon: it just stays down.
+            bool stillDown = _upPending && down == _buttonDown;
+            if (_upPending && !stillDown) Effects.Mouse(_buttonUp, _buttonData);
+            _buttonRelease.Change(Timeout.Infinite, Timeout.Infinite);
+            _upPending = false;
+            _buttonDown = down;
+            _buttonUp = x ? MOUSEEVENTF_XUP : MOUSEEVENTF_MIDDLEUP;
+            _buttonData = x ? XBUTTON2 : 0;
+            _buttonHeld = Settings.Current.For(_slot).Trigger == Trigger.Hold;
+            _buttonAt = Environment.TickCount64;
+            if (!stillDown) Effects.Mouse(_buttonDown, _buttonData);
             return;
         }
         _mode = Mode.Key;
@@ -295,7 +331,16 @@ sealed class Gestures
             Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
         }
         EndSecond();
-        if (_mode == Mode.Middle) Effects.Mouse(MOUSEEVENTF_MIDDLEUP);
+        if (_mode == Mode.Button)
+        {
+            long left = MinHeldMs - (Environment.TickCount64 - _buttonAt);
+            if (_buttonHeld && left > 0)
+            {
+                _upPending = true;
+                _buttonRelease.Change(left, Timeout.Infinite);
+            }
+            else Effects.Mouse(_buttonUp, _buttonData);
+        }
         _repeat.Change(Timeout.Infinite, Timeout.Infinite);
         _repeatKey = 0;
         _mode = Mode.None;

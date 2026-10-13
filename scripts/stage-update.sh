@@ -2,7 +2,7 @@
 # Build and stage an update on Ilias's PC without touching the running app: it lands in
 # C:\TrackpadClicks\update and is applied when he clicks "Установить" (tray, settings
 # window, or a trackpadclicks://update link). See Updater.cs.
-#   scripts/stage-update.sh "what's new" [driver-dir driver-version]
+#   [RESTART_CIAO=1] scripts/stage-update.sh "what's new" [driver-dir driver-version]
 # driver-dir: a Magic Trackpad driver package for AMD64 (the .inf, .sys, .cat, .dll).
 set -e
 NOTES="$1"; DRIVER_DIR="$2"; DRIVER_VERSION="$3"
@@ -13,7 +13,7 @@ VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' TrackpadClicks.csproj)
 
 STAGE=$(mktemp -d)
 cp out/TrackpadClicks.exe "$STAGE/"
-python3 -c 'import json,sys; print(json.dumps({"version": sys.argv[1], "notes": sys.argv[2], "driver": sys.argv[3] or None}, ensure_ascii=False))' \
+python3 -c 'import json,sys,os; print(json.dumps({"version": sys.argv[1], "notes": sys.argv[2], "driver": sys.argv[3] or None, "restartCiao": os.environ.get("RESTART_CIAO") == "1"}, ensure_ascii=False))' \
   "$VERSION" "$NOTES" "${DRIVER_DIR:+$DRIVER_VERSION}" > "$STAGE/update.json"
 [ -n "$DRIVER_DIR" ] && mkdir "$STAGE/driver" && cp "$DRIVER_DIR"/* "$STAGE/driver/"
 
