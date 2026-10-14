@@ -151,13 +151,17 @@ Windows synthesizes for a gesture's click. It runs four threads:
   it only decides swallow or pass from state in memory, never calling anything that
   can block;
 - **raw input** (`RawInput.cs`): parses the HID reports;
-- **effects** (`Effects.cs`): SendInput, moving windows, the log;
+- **effects** (`Effects.cs`): SendInput, moving windows, media sessions (`Media.cs`),
+  T3 Code's keys, the haptic tick, the log;
 - **UI** (`Program.cs`): the tray icon and the settings window (`SettingsWindow.cs`,
   a WebView2 page from `ui/settings.html` embedded in the exe; open that file in a
   browser to see it with a demo finger). If the raw input or effects thread is busy
   on one call for over 2 s, it switches gestures off, turns the icon red and logs the
-  call. The mouse keeps working as a plain touchpad; **Restart** in the menu brings
-  gestures back.
+  call. The mouse keeps working as a plain touchpad, and gestures come back by
+  themselves once the thread moves on (**Restart** in the menu, if it never does).
+
+Thread pool threads read Ciao's `state.json` (`Ciao.cs`) and download updates from
+GitHub (`Updater.cs`).
 
 What each click means is in `Gestures.cs`, with the bindings from `Settings.cs`. Quirks of the Magic Trackpad driver that
 the parsing works around are commented in `RawInput.cs`.

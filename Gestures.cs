@@ -8,11 +8,17 @@
 //
 // What a click does comes from the settings (Settings.cs): a click with 3 or with 4
 // fingers, and a click with 1 finger (a thumb, say) in one of six edge zones — the left
-// or right strip of the pad, split in three by height (the middle one's height set per side). Each gets an action: the middle
-// button or mouse button 5 (held while the pad is; after a Hold trigger, for at least
-// MinHeldMs, so an app never takes a held gesture for a short tap), a media key, a volume step (repeating while held like
-// a held key), a T3 Code agent action (send, stop, voice), or nothing, left to Windows. With the Hold trigger the press is held back:
-// released before HoldMs it is replayed as the click it was, held longer it is the action.
+// or right strip of the pad, split in three by height (the middle one's height set per
+// side). Each gets an action:
+//   the middle button or mouse button 5, held while the pad is (after a Hold trigger,
+//     for at least MinHeldMs, so an app never takes a held gesture for a short tap);
+//   play/pause or a track key, sent to the music app's media session only (Media.cs);
+//   play/pause for every app but the music one, resuming what played last;
+//   a volume step, repeating while held like a held key;
+//   a T3 Code agent action (send, stop, voice);
+//   or nothing, left to Windows.
+// With the Hold trigger the press is held back: released before HoldMs it is replayed
+// as the click it was, held longer it is the action.
 // On a dictation zone a quick double click taps mouse button 5 instead: hands-free
 // dictation in Ciao on. While it is on (Ciao.cs), a single click taps it: off.
 //
@@ -353,7 +359,7 @@ sealed class Gestures
             if (_action == GestureAction.DictationButton && Ciao.HandsFree)
             {
                 // Set now: a quick second click must not start it again before Ciao says so.
-                Ciao.HandsFree = false;
+                Ciao.Stopped();
                 _earlySlot = "";
                 Effects.Mouse(MOUSEEVENTF_XDOWN, XBUTTON2);
                 Effects.Mouse(MOUSEEVENTF_XUP, XBUTTON2);

@@ -11,6 +11,15 @@ namespace TrackpadClicks;
 static class Ciao
 {
     public static volatile bool HandsFree;
+    // When our stop tap went out (DateTime ticks, UTC): a file older than that is stale.
+    static long _stoppedAt;
+
+    // From the hook: memory only.
+    public static void Stopped()
+    {
+        HandsFree = false;
+        Interlocked.Exchange(ref _stoppedAt, DateTime.UtcNow.Ticks);
+    }
 
     static readonly object ReadLock = new();
     static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ciao");
@@ -28,7 +37,7 @@ static class Ciao
             _watcher.Changed += (_, _) => Read();
             _watcher.Created += (_, _) => Read();
             _watcher.Renamed += (_, _) => Read();
-            _watcher.Deleted += (_, _) => HandsFree = false;
+            _watcher.Deleted += (_, _) => Read();
             _watcher.EnableRaisingEvents = true;
         }
         catch (Exception e) { Log.Write($"ciao state: no watch ({e.Message})"); }
@@ -54,11 +63,15 @@ static class Ciao
         {
             try
             {
-                using var doc = JsonDocument.Parse(File.ReadAllText(Path.Combine(Dir, "state.json")));
+                string file = Path.Combine(Dir, "state.json");
+                var written = File.GetLastWriteTimeUtc(file).Ticks;
+                using var doc = JsonDocument.Parse(File.ReadAllText(file));
                 var root = doc.RootElement;
                 on = root.TryGetProperty("recording", out var r) && r.GetBoolean()
                      && root.TryGetProperty("handsFree", out var h) && h.GetBoolean()
-                     && (!root.TryGetProperty("pid", out var pid) || Alive(pid.GetInt32()));
+                     && (!root.TryGetProperty("pid", out var pid) || Alive(pid.GetInt32()))
+                     // Written before our stop tap: Ciao hasn't caught up yet.
+                     && written > Interlocked.Read(ref _stoppedAt);
                 break;
             }
             catch (FileNotFoundException) { on = false; break; }

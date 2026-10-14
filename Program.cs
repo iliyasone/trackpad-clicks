@@ -89,7 +89,9 @@ sealed class Tray : ApplicationContext
         {
             string? error = await Task.Run(Updater.Fetch);
             CheckUpdate();
-            if (error != null)
+            if (error == "Проверка уже идёт.")
+                _icon?.ShowBalloonTip(5000, "TrackpadClicks", error, ToolTipIcon.Info);
+            else if (error != null)
                 _icon?.ShowBalloonTip(5000, "TrackpadClicks", $"Не удалось проверить обновления. {error}", ToolTipIcon.Warning);
             else if (Updater.Check() == null)
                 _icon?.ShowBalloonTip(5000, "TrackpadClicks", $"Версия {Updater.Current} последняя.", ToolTipIcon.Info);

@@ -80,24 +80,28 @@ static class Media
         }
     }
 
+    // Playing now: the last played, unless it is the music app ("what played last" is for
+    // the others). Also for sessions already playing when watching starts.
+    static void Seen(GlobalSystemMediaTransportControlsSession s)
+    {
+        try
+        {
+            string app = Settings.Current.MediaApp;
+            if (s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                && (app.Length == 0 || !s.SourceAppUserModelId.Contains(app, StringComparison.OrdinalIgnoreCase)))
+                _lastPlayed = s.SourceAppUserModelId;
+        }
+        catch { }
+    }
+
     static void Watch(GlobalSystemMediaTransportControlsSessionManager manager)
     {
         lock (Watched)
             foreach (var session in manager.GetSessions())
             {
                 if (!Watched.Add(session)) continue;
-                session.PlaybackInfoChanged += (s, _) =>
-                {
-                    try
-                    {
-                        // The music app is left out: "what played last" is for the others.
-                        string app = Settings.Current.MediaApp;
-                        if (s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
-                            && (app.Length == 0 || !s.SourceAppUserModelId.Contains(app, StringComparison.OrdinalIgnoreCase)))
-                            _lastPlayed = s.SourceAppUserModelId;
-                    }
-                    catch { }
-                };
+                Seen(session);
+                session.PlaybackInfoChanged += (s, _) => Seen(s);
             }
     }
 

@@ -14,7 +14,7 @@ try {
         Write-Output 'Secure Boot is on: turn it off in the firmware settings first.'
         exit 20
     }
-    # Both files first: nothing is changed for a package that can't be installed.
+    # Both files first: nothing is changed for a package missing either.
     $cer = Get-ChildItem $here -Filter *.cer | Select-Object -First 1
     $inf = Get-ChildItem $here -Filter *.inf | Select-Object -First 1
     if (-not $cer -or -not $inf) { Write-Output 'No .cer or .inf next to this script.'; exit 22 }
