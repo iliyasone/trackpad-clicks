@@ -59,7 +59,7 @@ Defaults:
 | 3 fingers | Middle mouse button |
 | 4 fingers | Play/pause for everything but the music (T3 Code, Telegram…) |
 | 1 finger, left edge, top third, hold | Next track |
-| 1 finger, left edge, middle third, hold | Dictation button (push-to-talk in Ciao) |
+| 1 finger, left edge, middle third, hold | Dictation button (push-to-talk in Ciao); a double click: hands-free on, then one click: off |
 | 1 finger, left edge, bottom third, hold | Previous track |
 | 1 finger, right edge, top third | Volume up a step; hold to repeat |
 | 1 finger, right edge, middle third | Play/pause the music (Chrome) |

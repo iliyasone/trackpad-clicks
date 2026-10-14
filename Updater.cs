@@ -134,33 +134,34 @@ static class Updater
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
 
     // Downloads the latest release when it is newer than this exe and than what is
-    // staged; false when GitHub couldn't be asked. Never on the effects worker: it waits
-    // on the network. One at a time: the tray's check may meet the timer's.
+    // staged; returns what went wrong, in Russian for the tray, or null. Never on the
+    // effects worker or the UI thread: it waits on the network and hashes the exe. One
+    // at a time: the tray's check may meet the timer's.
     static readonly SemaphoreSlim Fetching = new(1, 1);
 
-    public static async Task<bool> Fetch()
+    public static async Task<string?> Fetch()
     {
-        if (!await Fetching.WaitAsync(0)) return true;
+        if (!await Fetching.WaitAsync(0)) return "Проверка уже идёт.";
         try
         {
             // A driver staged by hand is installed with its exe; a release must not replace it.
-            if (Check() is { Driver: not null }) return true;
+            if (Check() is { Driver: not null }) return null;
             using var request = new HttpRequestMessage(HttpMethod.Get, Releases);
             request.Headers.UserAgent.ParseAdd($"TrackpadClicks/{Current}");
             using var response = await Http.SendAsync(request);
             if (!response.IsSuccessStatusCode)
             {
                 Log.WriteNow($"update check failed: GitHub answered {(int)response.StatusCode}");
-                return false;
+                return $"GitHub ответил {(int)response.StatusCode}.";
             }
             using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var root = json.RootElement;
             string version = root.GetProperty("tag_name").GetString()!.TrimStart('v');
-            if (!System.Version.TryParse(version, out var v) || !System.Version.TryParse(Current, out var c) || v <= c) return true;
-            if (Check() is Pending staged && System.Version.TryParse(staged.Version, out var s) && s >= v) return true;
+            if (!System.Version.TryParse(version, out var v) || !System.Version.TryParse(Current, out var c) || v <= c) return null;
+            if (Check() is Pending staged && System.Version.TryParse(staged.Version, out var s) && s >= v) return null;
             var asset = root.GetProperty("assets").EnumerateArray()
                 .FirstOrDefault(a => a.GetProperty("name").GetString() == "TrackpadClicks.exe");
-            if (asset.ValueKind != System.Text.Json.JsonValueKind.Object) return true;
+            if (asset.ValueKind != System.Text.Json.JsonValueKind.Object) return null;
             Directory.CreateDirectory(Dir);
             string exe = Path.Combine(Dir, "TrackpadClicks.exe");
             // The whole download, not only its start, within 5 minutes.
@@ -183,7 +184,7 @@ static class Updater
                     file.Close();
                     File.Delete(exe + ".part");
                     Log.WriteNow($"update {version}: the download doesn't match GitHub's size or digest; dropped");
-                    return false;
+                    return "Обновление скачалось с ошибкой, попробую ещё раз позже.";
                 }
             }
             File.Move(exe + ".part", exe, true);
@@ -192,12 +193,12 @@ static class Updater
                 .Select(l => l.Trim().TrimStart('-', '*', ' ').Replace("**", "")).Where(l => l.Length > 0 && !l.StartsWith(">")).Take(3));
             File.WriteAllText(Manifest, JsonSerializer.Serialize(new Pending(version, notes, null), Settings.Json));
             Log.WriteNow($"update {version} downloaded from GitHub");
-            return true;
+            return null;
         }
         catch (Exception e)
         {
             Log.WriteNow($"update check failed: {e.Message}");
-            return false;
+            return "Нет связи с GitHub.";
         }
         finally { Fetching.Release(); }
     }

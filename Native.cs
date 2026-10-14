@@ -31,6 +31,8 @@ static class Native
     public const uint SWP_NOSIZE = 0x1, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_ASYNCWINDOWPOS = 0x4000;
     public const uint KEYEVENTF_EXTENDEDKEY = 0x1, KEYEVENTF_KEYUP = 0x2;
     public const ushort VK_RETURN = 0x0D, VK_BACK = 0x08, VK_CONTROL = 0x11, VK_MENU = 0x12;
+    // Unassigned: means nothing to any app, yet counts as our input for SetForegroundWindow.
+    public const ushort VK_NONE = 0xE8;
     public const ushort VK_MEDIA_NEXT_TRACK = 0xB0, VK_MEDIA_PREV_TRACK = 0xB1, VK_MEDIA_PLAY_PAUSE = 0xB3, VK_VOLUME_MUTE = 0xAD, VK_VOLUME_DOWN = 0xAE, VK_VOLUME_UP = 0xAF;
 
     [StructLayout(LayoutKind.Sequential)]

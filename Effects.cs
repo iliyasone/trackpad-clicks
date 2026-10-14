@@ -43,7 +43,8 @@ static class Effects
     public static void Key(ushort vk) => Worker.Post($"SendInput key 0x{vk:X}", () => SendKey(vk));
 
     // Keys pressed in T3 Code: its window is brought forward first. A background app may
-    // not take the foreground, but one that just sent input may; an Alt tap before helps.
+    // not take the foreground, but one that just sent input may: a tap of a key no app uses
+    // first (Alt would put the app in front into its menu).
     public static void T3Keys(string label, params ushort[] chord) => Worker.Post($"T3 Code: {label}", () =>
     {
         var window = System.Diagnostics.Process.GetProcesses()
@@ -56,8 +57,8 @@ static class Effects
         }
         if (GetForegroundWindow() != window)
         {
-            SendKeyEvent(VK_MENU, false);
-            SendKeyEvent(VK_MENU, true);
+            SendKeyEvent(VK_NONE, false);
+            SendKeyEvent(VK_NONE, true);
             SetForegroundWindow(window);
             Thread.Sleep(80);
             // Refused: the keys would land in whatever app is in front.

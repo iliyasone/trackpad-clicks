@@ -49,8 +49,9 @@ static class Ciao
 
     static void ReadLocked()
     {
-        bool on = false;
-        // Ciao may be mid-write: one retry.
+        // Unreadable twice (Ciao renaming it in): keep what was known; the next write or
+        // recheck reads it again.
+        bool on = HandsFree;
         for (int i = 0; i < 2; i++)
         {
             try
@@ -62,7 +63,7 @@ static class Ciao
                      && (!root.TryGetProperty("pid", out var pid) || Alive(pid.GetInt32()));
                 break;
             }
-            catch (FileNotFoundException) { break; }
+            catch (FileNotFoundException) { on = false; break; }
             catch { Thread.Sleep(30); }
         }
         if (on != HandsFree) Log.Write($"ciao: hands-free {(on ? "on" : "off")}");

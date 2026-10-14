@@ -25,7 +25,7 @@ static class Media
     {
         var sessions = Manager().GetSessions().Where(s => s.SourceAppUserModelId.Contains(app, StringComparison.OrdinalIgnoreCase)).ToList();
         if (sessions.Count == 0) return false;
-        // Several tabs: the one playing, else the most recent.
+        // Several tabs: the one playing, else the first Windows lists.
         var session = sessions.FirstOrDefault(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
                       ?? sessions[0];
         var call = action switch
@@ -48,7 +48,8 @@ static class Media
         var playing = sessions.Where(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToList();
         if (playing.Count > 0)
         {
-            foreach (var s in playing) s.TryPauseAsync().AsTask().Wait(1000);
+            // All at once, within one second together.
+            Task.WaitAll(playing.Select(s => s.TryPauseAsync().AsTask()).ToArray(), 1000);
             return true;
         }
         var last = sessions.FirstOrDefault(s => s.SourceAppUserModelId == _lastPlayed) ?? sessions[0];
@@ -61,13 +62,20 @@ static class Media
     static volatile string? _lastPlayed;
     static readonly HashSet<GlobalSystemMediaTransportControlsSession> Watched = new();
 
+    // From the worker and the settings window: one manager, made once. A media service
+    // that doesn't answer in 2 s throws, and the next call asks again.
     static GlobalSystemMediaTransportControlsSessionManager Manager()
     {
-        if (_manager != null) return _manager;
-        _manager = GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask().Result;
-        _manager.SessionsChanged += (m, _) => Watch(m);
-        Watch(_manager);
-        return _manager;
+        lock (Watched)
+        {
+            if (_manager != null) return _manager;
+            var request = GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask();
+            if (!request.Wait(2000)) throw new TimeoutException("the media session service didn't answer");
+            _manager = request.Result;
+            _manager.SessionsChanged += (m, _) => Watch(m);
+            Watch(_manager);
+            return _manager;
+        }
     }
 
     static void Watch(GlobalSystemMediaTransportControlsSessionManager manager)

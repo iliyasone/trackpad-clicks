@@ -10,7 +10,7 @@ $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 Start-Transcript -Path 'C:\TrackpadClicks\driver-install.log' -Force | Out-Null
 try {
-    if ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State').UEFISecureBootEnabled -eq 1) {
+    if ((Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\SecureBoot\State' -ErrorAction SilentlyContinue).UEFISecureBootEnabled -eq 1) {
         Write-Output 'Secure Boot is on: turn it off in the firmware settings first.'
         exit 20
     }
