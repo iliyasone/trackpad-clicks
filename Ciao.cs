@@ -84,7 +84,12 @@ static class Ciao
     // A Ciao that crashed leaves its last state behind; see Recheck.
     static bool Alive(int pid)
     {
-        try { return !Process.GetProcessById(pid).HasExited; }
+        // After a restart the pid may belong to another process.
+        try
+        {
+            using var p = Process.GetProcessById(pid);
+            return !p.HasExited && p.ProcessName.Contains("ciao", StringComparison.OrdinalIgnoreCase);
+        }
         catch { return false; }
     }
 }

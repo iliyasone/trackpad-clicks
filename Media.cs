@@ -28,7 +28,7 @@ static class Media
         var sessions = Manager().GetSessions().Where(s => s.SourceAppUserModelId.Contains(app, StringComparison.OrdinalIgnoreCase)).ToList();
         if (sessions.Count == 0) return false;
         // Several tabs: the one playing, else the first Windows lists.
-        var session = sessions.FirstOrDefault(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+        var session = sessions.FirstOrDefault(Playing)
                       ?? sessions[0];
         var call = action switch
         {
@@ -47,7 +47,7 @@ static class Media
         var sessions = Manager().GetSessions()
             .Where(s => except.Length == 0 || !s.SourceAppUserModelId.Contains(except, StringComparison.OrdinalIgnoreCase)).ToList();
         if (sessions.Count == 0) return false;
-        var playing = sessions.Where(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToList();
+        var playing = sessions.Where(Playing).ToList();
         if (playing.Count > 0)
         {
             // All at once, within one wait together.
@@ -94,15 +94,26 @@ static class Media
         catch { }
     }
 
+    // A session that just closed throws: not playing.
+    static bool Playing(GlobalSystemMediaTransportControlsSession s)
+    {
+        try { return s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing; }
+        catch { return false; }
+    }
+
     static void Watch(GlobalSystemMediaTransportControlsSessionManager manager)
     {
-        lock (Watched)
-            foreach (var session in manager.GetSessions())
-            {
-                if (!Watched.Add(session)) continue;
-                Seen(session);
-                session.PlaybackInfoChanged += (s, _) => Seen(s);
-            }
+        try
+        {
+            lock (Watched)
+                foreach (var session in manager.GetSessions())
+                {
+                    if (!Watched.Add(session)) continue;
+                    Seen(session);
+                    session.PlaybackInfoChanged += (s, _) => Seen(s);
+                }
+        }
+        catch (Exception e) { Log.Write($"media sessions: {e.Message}"); }
     }
 
     // Started with the app, so the last one playing is known before the first gesture.

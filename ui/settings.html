@@ -480,7 +480,7 @@ function paintTest() {
         : ev.what === 'double' ? `${where} → двойной клик: диктовка без рук`
         : ev.what === 'stop' ? `${where} → клик: диктовка остановлена`
         : `${where} → оставлено Windows`;
-      const sym = ev.what === 'action' ? ev.action : ev.what.startsWith('second') ? 'windows' : 'windows';
+      const sym = ev.what === 'action' ? ev.action : ev.what === 'double' || ev.what === 'stop' ? 'dictationButton' : 'windows';
       return `<div class="event ${ev.seq === top ? 'fresh' : ''}" data-seq="${ev.seq}">${icon(sym)}<span>${text}</span><span class="when"></span></div>`;
     }).join('') || $('t-events').innerHTML;
     lastSeq = top;
