@@ -59,6 +59,7 @@ static class Effects
         {
             SendKeyEvent(VK_NONE, false);
             SendKeyEvent(VK_NONE, true);
+            if (IsIconic(window)) ShowWindowAsync(window, SW_RESTORE);
             SetForegroundWindow(window);
             Thread.Sleep(80);
             // Refused: the keys would land in whatever app is in front.

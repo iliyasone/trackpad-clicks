@@ -84,6 +84,9 @@ static class Native
     public static extern bool ShowWindowAsync(IntPtr hwnd, int cmd);
 
     [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
     public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll")]

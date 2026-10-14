@@ -60,6 +60,10 @@ static class Updater
     // never returns. From any copy of the exe: the running one, or one opened by a link.
     public static string? Apply()
     {
+        // Not while a download writes the staged exe and manifest; never released, as
+        // Apply ends in the new version or returns before touching anything.
+        if (!Fetching.Wait(0)) return "Обновление ещё скачивается, попробуй через минуту.";
+        Fetching.Release();
         var pending = Check();
         if (pending == null) return "Обновления нет.";
         Log.WriteNow($"update {Current} -> {pending.Version}{(pending.Driver != null ? $", driver {pending.Driver}" : "")}");

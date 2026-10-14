@@ -9,6 +9,8 @@ namespace TrackpadClicks;
 static class Media
 {
     static GlobalSystemMediaTransportControlsSessionManager? _manager;
+    // The manager's 1 s plus this stays under the watchdog's 2 s (Program.cs StuckMs).
+    const int TryMs = 700;
 
     // The sessions playing or paused now, by app id; for the settings window.
     public static string[] Apps()
@@ -34,7 +36,7 @@ static class Media
             GestureAction.PrevTrack => session.TrySkipPreviousAsync(),
             _ => session.TryTogglePlayPauseAsync(),
         };
-        call.AsTask().Wait(1000);
+        call.AsTask().Wait(TryMs);
         return true;
     }
 
@@ -48,12 +50,12 @@ static class Media
         var playing = sessions.Where(s => s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing).ToList();
         if (playing.Count > 0)
         {
-            // All at once, within one second together.
-            Task.WaitAll(playing.Select(s => s.TryPauseAsync().AsTask()).ToArray(), 1000);
+            // All at once, within one wait together.
+            Task.WaitAll(playing.Select(s => s.TryPauseAsync().AsTask()).ToArray(), TryMs);
             return true;
         }
         var last = sessions.FirstOrDefault(s => s.SourceAppUserModelId == _lastPlayed) ?? sessions[0];
-        last.TryPlayAsync().AsTask().Wait(1000);
+        last.TryPlayAsync().AsTask().Wait(TryMs);
         return true;
     }
 
@@ -63,14 +65,14 @@ static class Media
     static readonly HashSet<GlobalSystemMediaTransportControlsSession> Watched = new();
 
     // From the worker and the settings window: one manager, made once. A media service
-    // that doesn't answer in 2 s throws, and the next call asks again.
+    // that doesn't answer in 1 s throws, and the next call asks again.
     static GlobalSystemMediaTransportControlsSessionManager Manager()
     {
         lock (Watched)
         {
             if (_manager != null) return _manager;
             var request = GlobalSystemMediaTransportControlsSessionManager.RequestAsync().AsTask();
-            if (!request.Wait(2000)) throw new TimeoutException("the media session service didn't answer");
+            if (!request.Wait(1000)) throw new TimeoutException("the media session service didn't answer");
             _manager = request.Result;
             _manager.SessionsChanged += (m, _) => Watch(m);
             Watch(_manager);

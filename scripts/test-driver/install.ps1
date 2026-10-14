@@ -14,13 +14,16 @@ try {
         Write-Output 'Secure Boot is on: turn it off in the firmware settings first.'
         exit 20
     }
+    # Both files first: nothing is changed for a package that can't be installed.
+    $cer = Get-ChildItem $here -Filter *.cer | Select-Object -First 1
+    $inf = Get-ChildItem $here -Filter *.inf | Select-Object -First 1
+    if (-not $cer -or -not $inf) { Write-Output 'No .cer or .inf next to this script.'; exit 22 }
     $bitlocker = Get-BitLockerVolume -MountPoint 'C:' -ErrorAction SilentlyContinue
     if ($bitlocker -and $bitlocker.ProtectionStatus -eq 'On') { Suspend-BitLocker -MountPoint 'C:' -RebootCount 1 | Out-Null; Write-Output 'BitLocker suspended for one restart' }
     bcdedit /set testsigning on
     if ($LASTEXITCODE) { exit 21 }
-    $cer = Get-ChildItem $here -Filter *.cer | Select-Object -First 1
     foreach ($store in 'Root', 'TrustedPublisher') { Import-Certificate -FilePath $cer.FullName -CertStoreLocation "Cert:\LocalMachine\$store" | Out-Null }
-    pnputil /add-driver (Get-ChildItem $here -Filter *.inf | Select-Object -First 1).FullName /install
+    pnputil /add-driver $inf.FullName /install
     if ($LASTEXITCODE -notin 0, 3010) { exit $LASTEXITCODE }
     exit 3010
 }

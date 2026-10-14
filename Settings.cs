@@ -82,6 +82,7 @@ sealed record Config
             RightMiddle = Math.Clamp(RightMiddle == 0 ? 34 : RightMiddle, 10, 80),
             HoldMs = Math.Clamp(HoldMs, 150, 2000),
             PressForce = Math.Clamp(PressForce, 10, 250),
+            MediaApp = MediaApp ?? "",
         };
     }
 }

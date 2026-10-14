@@ -442,7 +442,8 @@ sealed class Gestures
     int _eventSeq;
 
     // What: "action" (the gesture fired), "early" (a hold let go early: a normal click),
-    // "windows" (a 3+ finger click left to Windows), "second-left"/"second-right".
+    // "windows" (a 3+ finger click left to Windows), "second-left"/"second-right",
+    // "double" (a double click: dictation on), "stop" (a click while hands-free: off).
     void Note(string slot, string what)
     {
         var action = Settings.Current.For(slot).Action;

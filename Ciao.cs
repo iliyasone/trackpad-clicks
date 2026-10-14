@@ -35,11 +35,9 @@ static class Ciao
         ThreadPool.QueueUserWorkItem(_ => Read());
     }
 
-    // Every 5 s from the tray: a Ciao that crashed hands-free never says it stopped.
-    public static void Recheck()
-    {
-        if (HandsFree) ThreadPool.QueueUserWorkItem(_ => Read());
-    }
+    // Every 5 s from the tray: a Ciao that crashed hands-free never says it stopped, and
+    // one that missed our stop tap never writes again.
+    public static void Recheck() => ThreadPool.QueueUserWorkItem(_ => Read());
 
     // The watcher's events, the start-up read and the recheck may overlap.
     static void Read()
