@@ -14,8 +14,9 @@ each click does and how the threads are split; read its "How it works" first.
   `Gestures.cs` in the same commit. A new action or setting goes into `Settings.cs`,
   `Gestures.Begin` and `ui/settings.html` (`NAMES`, `ICONS`) together.
 - The UI and tray texts are in Russian; code, comments, logs and the README in English.
-- The Magic Trackpad driver reports only contact ID, X, Y, contact count and the button —
-  no pressure or contact size. Don't build on force; a hold is the stand-in.
+- The Magic Trackpad driver before 2.2 reports only contact ID, X, Y, contact count and the
+  button. 2.2 and later add each finger's pressure, used only by the second press; the
+  edge zones tell a deliberate press from a click by a hold, so they work on any driver.
 
 ## Checking a change
 

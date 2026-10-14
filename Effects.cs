@@ -42,6 +42,55 @@ static class Effects
 
     public static void Key(ushort vk) => Worker.Post($"SendInput key 0x{vk:X}", () => SendKey(vk));
 
+    // Keys pressed in T3 Code: its window is brought forward first. A background app may
+    // not take the foreground, but one that just sent input may: a tap of a key no app uses
+    // first (Alt would put the app in front into its menu).
+    public static void T3Keys(string label, params ushort[] chord) => Worker.Post($"T3 Code: {label}", () =>
+    {
+        var window = System.Diagnostics.Process.GetProcesses()
+            .Where(p => p.ProcessName.StartsWith("T3 Code", StringComparison.OrdinalIgnoreCase) && p.MainWindowHandle != IntPtr.Zero)
+            .Select(p => p.MainWindowHandle).FirstOrDefault();
+        if (window == IntPtr.Zero)
+        {
+            Log.WriteNow($"T3 Code: {label}: no T3 Code window");
+            return;
+        }
+        if (GetForegroundWindow() != window)
+        {
+            SendKeyEvent(VK_NONE, false);
+            SendKeyEvent(VK_NONE, true);
+            if (IsIconic(window)) ShowWindowAsync(window, SW_RESTORE);
+            SetForegroundWindow(window);
+            Thread.Sleep(80);
+            // Refused: the keys would land in whatever app is in front.
+            if (GetForegroundWindow() != window)
+            {
+                Log.WriteNow($"T3 Code: {label}: its window didn't come forward");
+                return;
+            }
+        }
+        foreach (var vk in chord) SendKeyEvent(vk, false);
+        foreach (var vk in chord.Reverse()) SendKeyEvent(vk, true);
+    });
+
+    static void SendKeyEvent(ushort vk, bool up) => Send(new INPUT
+    {
+        Type = INPUT_KEYBOARD,
+        U = new InputUnion { Keyboard = new KEYBDINPUT { Vk = vk, Flags = up ? KEYEVENTF_KEYUP : 0, ExtraInfo = Tag } },
+    });
+
+    // Play/pause or a track key for one app's media session (see Media.cs).
+    public static void MediaKey(string app, GestureAction action) => Worker.Post($"media {action} to {app}", () =>
+    {
+        if (!Media.Send(app, action)) Log.WriteNow($"media {action}: nothing from \"{app}\" is playing");
+    });
+
+    // Play/pause for every app but the music one (see Media.cs).
+    public static void OtherPlayPause(string except) => Worker.Post($"media play/pause, not {except}", () =>
+    {
+        if (!Media.ToggleOther(except)) Log.WriteNow($"media play/pause: nothing but \"{except}\" has played");
+    });
+
     // Released without travel: the held-back press becomes the click it was.
     public static void Click(bool right) => Worker.Post("SendInput click", () =>
     {
@@ -127,4 +176,35 @@ static class Effects
             SetCursorPos(_from.X + dx, _from.Y + dy);
         });
     }
+
+    // ---- Haptics: a click under the finger, through the Magic Trackpad driver's
+    // \\.\AmtPtpHapticDeviceUm (IOCTL_PTPFILTER_ACTUATE, from the change proposed in
+    // vitoplantamura/MagicTrackpad2ForWindows#63). Without that driver, nothing happens.
+
+    const uint IoctlActuate = 0x0022A008;
+    static Microsoft.Win32.SafeHandles.SafeFileHandle? _haptic;
+    static long _hapticRetryAt;
+
+    // Strength in the driver's FeedbackClick encoding (0x060617: medium).
+    public static void Haptic(uint strength) => Worker.Post("haptic click", () =>
+    {
+        long now = Environment.TickCount64;
+        if (_haptic == null || _haptic.IsInvalid)
+        {
+            if (now < _hapticRetryAt) return;
+            _haptic = CreateFile(@"\\.\AmtPtpHapticDeviceUm", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+            if (_haptic.IsInvalid)
+            {
+                // Not this driver: look again in a minute, not on every click.
+                _hapticRetryAt = now + 60_000;
+                return;
+            }
+        }
+        if (!DeviceIoControl(_haptic, IoctlActuate, ref strength, 4, IntPtr.Zero, 0, out _, IntPtr.Zero))
+        {
+            Log.WriteNow($"haptic click failed {Marshal.GetLastWin32Error()}");
+            _haptic.Dispose();
+            _haptic = null;
+        }
+    });
 }

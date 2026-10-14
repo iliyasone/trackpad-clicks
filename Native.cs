@@ -30,6 +30,9 @@ static class Native
     public const int SW_SHOWMAXIMIZED = 3, SW_RESTORE = 9;
     public const uint SWP_NOSIZE = 0x1, SWP_NOZORDER = 0x4, SWP_NOACTIVATE = 0x10, SWP_ASYNCWINDOWPOS = 0x4000;
     public const uint KEYEVENTF_EXTENDEDKEY = 0x1, KEYEVENTF_KEYUP = 0x2;
+    public const ushort VK_RETURN = 0x0D, VK_BACK = 0x08, VK_CONTROL = 0x11, VK_MENU = 0x12;
+    // Unassigned: means nothing to any app, yet counts as our input for SetForegroundWindow.
+    public const ushort VK_NONE = 0xE8;
     public const ushort VK_MEDIA_NEXT_TRACK = 0xB0, VK_MEDIA_PREV_TRACK = 0xB1, VK_MEDIA_PLAY_PAUSE = 0xB3, VK_VOLUME_MUTE = 0xAD, VK_VOLUME_DOWN = 0xAE, VK_VOLUME_UP = 0xAF;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -81,10 +84,16 @@ static class Native
     public static extern bool ShowWindowAsync(IntPtr hwnd, int cmd);
 
     [DllImport("user32.dll")]
+    public static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
     public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll")]
     public static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr GetForegroundWindow();
 
     [DllImport("user32.dll")]
     public static extern bool SetCursorPos(int x, int y);
@@ -129,4 +138,14 @@ static class Native
     [DllImport("hid.dll")]
     public static extern int HidP_GetUsages(int reportType, ushort usagePage, ushort linkCollection,
         [Out] ushort[] usages, ref uint usageLength, IntPtr preparsed, IntPtr report, uint reportLength);
+
+    public const uint GENERIC_WRITE = 0x40000000, FILE_SHARE_READ = 1, FILE_SHARE_WRITE = 2, OPEN_EXISTING = 3;
+
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    public static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFile(string name, uint access, uint share, IntPtr security,
+        uint creation, uint flags, IntPtr template);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle device, uint code, ref uint input, uint inputSize,
+        IntPtr output, uint outputSize, out uint returned, IntPtr overlapped);
 }

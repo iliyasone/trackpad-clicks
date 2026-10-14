@@ -8,11 +8,19 @@
 //
 // What a click does comes from the settings (Settings.cs): a click with 3 or with 4
 // fingers, and a click with 1 finger (a thumb, say) in one of six edge zones — the left
-// or right strip of the pad, by thirds of its height. Each gets an action: the middle
-// button or mouse button 5 (held while the pad is; after a Hold trigger, for at least
-// MinHeldMs, so an app never takes a held gesture for a short tap), a media key, a volume step (repeating while held like
-// a held key), or nothing, left to Windows. With the Hold trigger the press is held back:
-// released before HoldMs it is replayed as the click it was, held longer it is the action.
+// or right strip of the pad, split in three by height (the middle one's height set per
+// side). Each gets an action:
+//   the middle button or mouse button 5, held while the pad is (after a Hold trigger,
+//     for at least MinHeldMs, so an app never takes a held gesture for a short tap);
+//   play/pause or a track key, sent to the music app's media session only (Media.cs);
+//   play/pause for every app but the music one, resuming what played last;
+//   a volume step, repeating while held like a held key;
+//   a T3 Code agent action (send, stop, voice);
+//   or nothing, left to Windows.
+// With the Hold trigger the press is held back: released before HoldMs it is replayed
+// as the click it was, held longer it is the action.
+// On a dictation zone a quick double click taps mouse button 5 instead: hands-free
+// dictation in Ciao on. While it is on (Ciao.cs), a single click taps it: off.
 //
 // Second press: while an edge zone holds a mouse button, the pad's one button is
 // already down, so another finger pressing gives no new click. With driver 2.2+ each
@@ -70,6 +78,9 @@ sealed class Gestures
     bool _pressSeen, _pressRight;
     readonly System.Threading.Timer _hold;
 
+    // T3 Code's media session id contains this (com.t3tools.t3code, or the exe name).
+    const string AgentVoiceApp = "t3";
+
     // Second press: the finger holding the edge, the button pressed by others (0 none,
     // 1 left, 2 right), and since when one finger presses (to wait for a second one).
     uint _holdFinger;
@@ -85,6 +96,14 @@ sealed class Gestures
     bool _buttonHeld, _upPending;
     readonly System.Threading.Timer _buttonRelease;
     const long MinHeldMs = 450;
+
+    // Double click on a dictation zone: two short clicks, the second pressed within
+    // DoubleMs of the first's release, tap mouse button 5 — Ciao takes a tap for
+    // hands-free dictation. The first click stays a click (waiting for a second would
+    // delay every click there); the second is swallowed. One click stops it.
+    string _earlySlot = "";
+    long _earlyAt, _startAt;
+    const long DoubleMs = 400;
 
     // The volume key held, or 0.
     ushort _repeatKey;
@@ -253,9 +272,10 @@ sealed class Gestures
         double x = (pad.Xs[0] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
         string side = x <= config.LeftEdge / 100.0 ? "left" : x >= 1 - config.RightEdge / 100.0 ? "right" : "";
         if (side == "") return null;
-        // Y grows downward.
+        // Y grows downward; the middle zone is centered, its height set per side.
         double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
-        return side + (y < 1.0 / 3 ? "-top" : y > 2.0 / 3 ? "-bottom" : "-middle");
+        double edge = (1 - (side == "left" ? config.LeftMiddle : config.RightMiddle) / 100.0) / 2;
+        return side + (y < edge ? "-top" : y > 1 - edge ? "-bottom" : "-middle");
     }
 
     void Start(Pad pad, string slot)
@@ -266,6 +286,7 @@ sealed class Gestures
         _slot = slot;
         _action = binding.Action;
         _pressSeen = false;
+        _startAt = Environment.TickCount64;
         _holdFinger = pad.Ids[0];
         _second = 0;
         _secondSince = 0;
@@ -303,6 +324,13 @@ sealed class Gestures
             return;
         }
         _mode = Mode.Key;
+        switch (_action)
+        {
+            case GestureAction.AgentSend: Effects.T3Keys("send", VK_RETURN); return;
+            case GestureAction.AgentStop: Effects.T3Keys("stop", VK_CONTROL, VK_MENU, VK_BACK); return;
+            case GestureAction.AgentVoice: Effects.MediaKey(AgentVoiceApp, GestureAction.PlayPause); return;
+            case GestureAction.OtherPlayPause: Effects.OtherPlayPause(Settings.Current.MediaApp); return;
+        }
         ushort key = _action switch
         {
             GestureAction.PlayPause => VK_MEDIA_PLAY_PAUSE,
@@ -312,7 +340,9 @@ sealed class Gestures
             GestureAction.VolumeDown => VK_VOLUME_DOWN,
             _ => VK_VOLUME_MUTE,
         };
-        Effects.Key(key);
+        if (key is VK_MEDIA_PLAY_PAUSE or VK_MEDIA_NEXT_TRACK or VK_MEDIA_PREV_TRACK && Settings.Current.MediaApp is { Length: > 0 } app)
+            Effects.MediaKey(app, _action);
+        else Effects.Key(key);
         if (key is VK_VOLUME_UP or VK_VOLUME_DOWN)
         {
             _repeatKey = key;
@@ -324,11 +354,34 @@ sealed class Gestures
     {
         if (_mode == Mode.Waiting)
         {
-            // Let go before HoldMs: an ordinary click.
+            // Let go before HoldMs: an ordinary click, or the second of a double click.
             _hold.Change(Timeout.Infinite, Timeout.Infinite);
-            if (_pressSeen) Effects.Click(_pressRight);
-            Note(_slot, "early");
-            Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
+            if (_action == GestureAction.DictationButton && Ciao.HandsFree)
+            {
+                // Set now: a quick second click must not start it again before Ciao says so.
+                Ciao.Stopped();
+                _earlySlot = "";
+                Effects.Mouse(MOUSEEVENTF_XDOWN, XBUTTON2);
+                Effects.Mouse(MOUSEEVENTF_XUP, XBUTTON2);
+                Note(_slot, "stop");
+                Log.Write($"{_slot}: click while hands-free, dictation button tap");
+            }
+            else if (_action == GestureAction.DictationButton && _earlySlot == _slot && _startAt - _earlyAt < DoubleMs)
+            {
+                _earlySlot = "";
+                Effects.Mouse(MOUSEEVENTF_XDOWN, XBUTTON2);
+                Effects.Mouse(MOUSEEVENTF_XUP, XBUTTON2);
+                Note(_slot, "double");
+                Log.Write($"{_slot}: double click, dictation button tap");
+            }
+            else
+            {
+                if (_pressSeen) Effects.Click(_pressRight);
+                _earlySlot = _slot;
+                _earlyAt = Environment.TickCount64;
+                Note(_slot, "early");
+                Log.Write($"{_slot}: released before the hold, {(_pressRight ? "right" : "left")} click");
+            }
         }
         EndSecond();
         if (_mode == Mode.Button)
@@ -371,13 +424,19 @@ sealed class Gestures
         if (pressing < 2 && now - _secondSince < SecondPairMs) return;
         _second = pressing >= 2 ? 2 : 1;
         Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
+        if (config.Haptic) Effects.Haptic(0x060617);
         Log.Write($"{_slot}: second press, {(_second == 2 ? "right" : "left")} down");
         Note(_slot, _second == 2 ? "second-right" : "second-left");
     }
 
     void EndSecond()
     {
-        if (_second != 0) Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP);
+        if (_second != 0)
+        {
+            Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTUP : MOUSEEVENTF_LEFTUP);
+            // A lighter click on release, as the pad does for its own button.
+            if (Settings.Current.Haptic) Effects.Haptic(0x040415);
+        }
         _second = 0;
         _secondSince = 0;
     }
@@ -389,7 +448,8 @@ sealed class Gestures
     int _eventSeq;
 
     // What: "action" (the gesture fired), "early" (a hold let go early: a normal click),
-    // "windows" (a 3+ finger click left to Windows), "second-left"/"second-right".
+    // "windows" (a 3+ finger click left to Windows), "second-left"/"second-right",
+    // "double" (a double click: dictation on), "stop" (a click while hands-free: off).
     void Note(string slot, string what)
     {
         var action = Settings.Current.For(slot).Action;

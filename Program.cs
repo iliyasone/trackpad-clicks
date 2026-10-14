@@ -8,7 +8,7 @@
 //   UI          — the tray icon, the settings window, and the watch over the other two.
 // Every mouse event in the system waits for the hook, so a call that hangs must never
 // run on it. A stuck raw input or effects thread only switches gestures off, shown in
-// the tray.
+// the tray, until it moves on.
 
 using System.Diagnostics;
 using System.Drawing.Drawing2D;
@@ -48,6 +48,8 @@ static class Program
         Updater.Register();
         Updater.Clean();
         Worker.Start();
+        Media.Start();
+        Ciao.Start();
         var gestures = new Gestures();
         RawInput.Start(gestures);
         MouseHook.Start(gestures);
@@ -83,6 +85,17 @@ sealed class Tray : ApplicationContext
         menu.Items.Add(_update);
         menu.Items.Add(settings);
         menu.Items.Add(_enabled);
+        menu.Items.Add("Проверить обновления", null, async (_, _) =>
+        {
+            string? error = await Task.Run(Updater.Fetch);
+            CheckUpdate();
+            if (error == "Проверка уже идёт.")
+                _icon?.ShowBalloonTip(5000, "TrackpadClicks", error, ToolTipIcon.Info);
+            else if (error != null)
+                _icon?.ShowBalloonTip(5000, "TrackpadClicks", $"Не удалось проверить обновления. {error}", ToolTipIcon.Warning);
+            else if (Updater.Check() == null)
+                _icon?.ShowBalloonTip(5000, "TrackpadClicks", $"Версия {Updater.Current} последняя.", ToolTipIcon.Info);
+        });
         menu.Items.Add("Открыть лог", null, (_, _) => Process.Start(new ProcessStartInfo(Log.Path) { UseShellExecute = true }));
         menu.Items.Add("Перезапустить", null, (_, _) => Restart());
         menu.Items.Add(new ToolStripSeparator());
@@ -95,7 +108,13 @@ sealed class Tray : ApplicationContext
         timer.Tick += (_, _) =>
         {
             Watch();
-            if (_ticks++ % 10 == 0) CheckUpdate();
+            if (_ticks++ % 10 == 0)
+            {
+                CheckUpdate();
+                Ciao.Recheck();
+            }
+            // GitHub: a minute after start, then every 6 hours.
+            if (_ticks % 43200 == 120) _ = Task.Run(Updater.Fetch);
         };
         timer.Start();
     }
@@ -144,12 +163,23 @@ sealed class Tray : ApplicationContext
         if (_window is { IsDisposed: false }) _window.SendState();
     }
 
-    // A thread busy on one item for too long is stuck: gestures off, say so.
+    // A thread busy on one item for too long is stuck: gestures off, say so. Once it moves
+    // on (a slow disk or a busy start-up, not a real hang), gestures come back by themselves.
     void Watch()
     {
-        if (_stuck != null) return;
-        _stuck = Stuck(ref Worker.BusySince, Worker.At, "действия")
-                 ?? Stuck(ref RawInput.BusySince, RawInput.At, "чтение трекпада");
+        string? stuck = Stuck(ref Worker.BusySince, Worker.At, "действия")
+                        ?? Stuck(ref RawInput.BusySince, RawInput.At, "чтение трекпада");
+        if (_stuck != null)
+        {
+            if (stuck != null) return;
+            _stuck = null;
+            lock (_gestures.Sync) _gestures.Reset();
+            Gestures.Enabled = _enabled.Checked;
+            Log.WriteNow("unstuck; gestures back on");
+            Show();
+            return;
+        }
+        _stuck = stuck;
         if (_stuck == null) return;
         Gestures.Enabled = false;
         Log.WriteNow($"stuck: {_stuck}; gestures off");

@@ -9,7 +9,16 @@ namespace TrackpadClicks;
 
 // DictationButton: mouse button 5 ("forward", XButton2) held while the pad is, to bind as
 // a dictation trigger (in Ciao) and leave the middle button free for apps.
-enum GestureAction { Windows, MiddleClick, PlayPause, NextTrack, PrevTrack, VolumeUp, VolumeDown, Mute, DictationButton }
+// Agent*: for T3 Code. AgentSend presses Enter in its window (the composer's send),
+// AgentStop presses Ctrl+Alt+Backspace (bound to thread.stop in T3's keybindings.json),
+// AgentVoice toggles play/pause of T3 Code's media session (the agent's voice reply).
+// OtherPlayPause: play/pause for every app but MediaApp (T3 Code, Telegram…): pauses what
+// plays, else resumes the one that played last.
+enum GestureAction
+{
+    Windows, MiddleClick, PlayPause, NextTrack, PrevTrack, VolumeUp, VolumeDown, Mute, DictationButton,
+    AgentSend, AgentStop, AgentVoice, OtherPlayPause,
+}
 
 // Click: the action goes on the press. Hold: a short click stays a normal click, the
 // action goes once the pad has been held down for HoldMs.
@@ -34,17 +43,27 @@ sealed record Config
         ["right-middle"] = new(GestureAction.PlayPause),
         ["right-bottom"] = new(GestureAction.VolumeDown),
         ["three"] = new(GestureAction.MiddleClick),
-        ["four"] = new(GestureAction.Windows),
+        ["four"] = new(GestureAction.OtherPlayPause),
     };
 
     // Width of the left and right edge strips, in percent of the pad's width.
     public int LeftEdge { get; init; } = 30;
     public int RightEdge { get; init; } = 20;
+    // Height of the middle zone of each edge, in percent of the pad's height; the top and
+    // bottom zones share the rest.
+    public int LeftMiddle { get; init; } = 34;
+    public int RightMiddle { get; init; } = 34;
     public int HoldMs { get; init; } = 400;
     // While an edge zone holds the middle button, another finger pressing at least this
     // hard (0..255, driver 2.2+) is a second click: left, or right with two fingers.
     public bool SecondPress { get; init; } = true;
     public int PressForce { get; init; } = 70;
+    // A click under the finger on the second press; needs the driver change in
+    // vitoplantamura/MagicTrackpad2ForWindows#63.
+    public bool Haptic { get; init; } = true;
+    // Play/pause and the track keys go only to this app's media session (part of its
+    // id, e.g. "chrome"); empty: to whatever Windows picks, like a media key.
+    public string MediaApp { get; init; } = "chrome";
 
     public Binding For(string slot) => Gestures.TryGetValue(slot, out var b) ? b : new(GestureAction.Windows);
 
@@ -59,8 +78,11 @@ sealed record Config
             Gestures = gestures,
             LeftEdge = Math.Clamp(LeftEdge, 5, 45),
             RightEdge = Math.Clamp(RightEdge, 5, 45),
+            LeftMiddle = Math.Clamp(LeftMiddle == 0 ? 34 : LeftMiddle, 10, 80),
+            RightMiddle = Math.Clamp(RightMiddle == 0 ? 34 : RightMiddle, 10, 80),
             HoldMs = Math.Clamp(HoldMs, 150, 2000),
             PressForce = Math.Clamp(PressForce, 10, 250),
+            MediaApp = MediaApp ?? "",
         };
     }
 }

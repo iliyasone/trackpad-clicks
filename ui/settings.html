@@ -150,6 +150,7 @@
   .bar.hot i { opacity: 1; background: #ff9f0a; }
   .bar span { position: relative; padding: 0 8px; line-height: 22px; }
   .bar u { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--text); opacity: .5; }
+  select { font: inherit; color: var(--text); background: var(--panel-2); border: 0; border-radius: 8px; padding: 5px 8px; max-width: 170px; }
   .disabled .pad, .disabled .cards { opacity: .45; filter: grayscale(.6); }
 </style>
 </head>
@@ -206,6 +207,14 @@
         <input type="range" id="right-edge" min="5" max="45" step="1">
       </div>
       <div class="slider">
+        <span>Середина слева</span><output id="left-mid-out"></output>
+        <input type="range" id="left-mid" min="10" max="80" step="1">
+      </div>
+      <div class="slider">
+        <span>Середина справа</span><output id="right-mid-out"></output>
+        <input type="range" id="right-mid" min="10" max="80" step="1">
+      </div>
+      <div class="slider">
         <span>Время удержания</span><output id="hold-out"></output>
         <input type="range" id="hold" min="150" max="1200" step="50">
       </div>
@@ -218,6 +227,15 @@
       <div class="slider">
         <span>Сила второго нажатия</span><output id="force-out"></output>
         <input type="range" id="force" min="10" max="250" step="5">
+      </div>
+      <div>
+        <div class="row"><span>Щелчок под пальцем</span><div class="switch mini" id="haptic"><div class="track"></div></div></div>
+        <div class="hint">Тачпад щёлкает на второе нажатие. Нужен драйвер с командой вибрации (pull request #63 в MagicTrackpad2ForWindows).</div>
+      </div>
+      <div class="divider"></div>
+      <div>
+        <div class="row"><span>Музыка</span><select id="media-app"></select></div>
+        <div class="hint">Плей/пауза и треки уходят только этому приложению, а не тому, кто последним играл звук (например, голосу агента).</div>
       </div>
      </div>
      <div class="test">
@@ -265,11 +283,17 @@ const ICONS = {
   volumeDown: speaker + '<path d="M15.5 9a4 4 0 010 6"/>',
   mute: speaker + '<path d="M16 9.5l5 5M21 9.5l-5 5"/>',
   dictationButton: '<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11a6.5 6.5 0 0013 0M12 17.5V21"/>',
+  agentSend: '<path d="M4 12l16-8-6 16-2.5-6.5z"/><path d="M11.5 13.5L20 4"/>',
+  agentStop: '<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" stroke="none"/>',
+  agentVoice: '<path d="M4 5h16v11H9l-5 4z"/><path d="M10 9v3M13 8v5M16 9.5v2"/>',
+  otherPlayPause: '<path d="M3 6l7 6-7 6z" fill="currentColor" stroke="none"/><path d="M13 6.5v11M17 6.5v11"/><path d="M20.5 5l-1 3M21.5 10h-1.5"/>',
 };
 const NAMES = {
   windows: 'Как обычно', middleClick: 'Средний клик', playPause: 'Плей / пауза', nextTrack: 'Следующий трек',
   prevTrack: 'Предыдущий трек', volumeUp: 'Громче', volumeDown: 'Тише', mute: 'Без звука',
   dictationButton: 'Диктовка (кнопка «Вперёд»)',
+  agentSend: 'Отправить агенту', agentStop: 'Остановить агента', agentVoice: 'Голос агента: плей/пауза',
+  otherPlayPause: 'Плей / пауза: всё, кроме музыки',
 };
 const SLOTS = {
   'left-top': ['Левый край, сверху', 'Клик одним пальцем'], 'left-middle': ['Левый край, посередине', 'Клик одним пальцем'],
@@ -283,7 +307,7 @@ const $ = id => document.getElementById(id);
 const host = window.chrome && window.chrome.webview;
 const send = msg => host && host.postMessage(msg);
 
-let config = null, enabled = true, selected = 'right-middle', version = '', update = null;
+let config = null, enabled = true, selected = 'right-middle', version = '', update = null, mediaApps = [];
 
 function render() {
   if (!config) return;
@@ -292,6 +316,8 @@ function render() {
   $('right').style.width = config.rightEdge + '%';
   pad.style.setProperty('--hold', config.holdMs + 'ms');
   for (const side of ['left', 'right']) {
+    const mid = side === 'left' ? config.leftMiddle : config.rightMiddle;
+    $(side).style.gridTemplateRows = `${100 - mid}fr ${2 * mid}fr ${100 - mid}fr`;
     $(side).innerHTML = ['top', 'middle', 'bottom'].map(h => zoneHtml(`${side}-${h}`)).join('');
   }
   $('cards').innerHTML = ['three', 'four'].map(slot => {
@@ -314,10 +340,17 @@ function render() {
     : 'Действие сразу при нажатии; обычного клика в этой зоне нет.';
   $('left-edge').value = config.leftEdge; $('left-out').textContent = config.leftEdge + '%';
   $('right-edge').value = config.rightEdge; $('right-out').textContent = config.rightEdge + '%';
+  $('left-mid').value = config.leftMiddle; $('left-mid-out').textContent = config.leftMiddle + '%';
+  $('right-mid').value = config.rightMiddle; $('right-mid-out').textContent = config.rightMiddle + '%';
   $('hold').value = config.holdMs; $('hold-out').textContent = config.holdMs + ' мс';
   $('second').classList.toggle('on', config.secondPress);
   $('force').value = config.pressForce; $('force-out').textContent = config.pressForce;
   $('force').disabled = !config.secondPress;
+  $('haptic').classList.toggle('on', config.haptic);
+  const apps = [...new Set(['chrome', ...mediaApps.map(a => a.toLowerCase().includes('chrome') ? 'chrome' : a), config.mediaApp].filter(Boolean))];
+  $('media-app').innerHTML = '<option value="">Любое (как клавиша)</option>' +
+    apps.map(a => { const o = document.createElement('option'); o.value = a; o.textContent = a === 'chrome' ? 'Chrome' : a; return o.outerHTML; }).join('');
+  $('media-app').value = config.mediaApp || '';
   $('version').textContent = version ? 'версия ' + version : '';
   $('banner').classList.toggle('show', !!update);
   if (update) {
@@ -362,6 +395,8 @@ document.addEventListener('click', e => {
 $('enabled').onclick = () => { enabled = !enabled; render(); send({ type: 'enabled', value: enabled }); };
 $('log').onclick = () => send({ type: 'log' });
 $('second').onclick = () => change(() => config.secondPress = !config.secondPress);
+$('haptic').onclick = () => change(() => config.haptic = !config.haptic);
+$('media-app').onchange = e => change(() => config.mediaApp = e.target.value);
 $('force').oninput = e => { config.pressForce = +e.target.value; render(); };
 $('force').onchange = () => change(() => {});
 $('banner-install').onclick = () => {
@@ -372,7 +407,9 @@ $('banner-install').onclick = () => {
 $('left-edge').oninput = e => { config.leftEdge = +e.target.value; render(); };
 $('right-edge').oninput = e => { config.rightEdge = +e.target.value; render(); };
 $('hold').oninput = e => { config.holdMs = +e.target.value; render(); };
-$('left-edge').onchange = $('right-edge').onchange = $('hold').onchange = () => change(() => {});
+$('left-mid').oninput = e => { config.leftMiddle = +e.target.value; render(); };
+$('right-mid').oninput = e => { config.rightMiddle = +e.target.value; render(); };
+$('left-edge').onchange = $('right-edge').onchange = $('left-mid').onchange = $('right-mid').onchange = $('hold').onchange = () => change(() => {});
 let testing = false;
 $('test-toggle').onclick = () => {
   testing = !testing;
@@ -440,8 +477,10 @@ function paintTest() {
         : ev.what === 'second-left' ? `${where} → второе нажатие, левый клик`
         : ev.what === 'second-right' ? `${where} → второе нажатие, правый клик`
         : ev.what === 'early' ? `${where} → отпущено раньше, обычный клик`
+        : ev.what === 'double' ? `${where} → двойной клик: диктовка без рук`
+        : ev.what === 'stop' ? `${where} → клик: диктовка остановлена`
         : `${where} → оставлено Windows`;
-      const sym = ev.what === 'action' ? ev.action : ev.what.startsWith('second') ? 'windows' : 'windows';
+      const sym = ev.what === 'action' ? ev.action : ev.what === 'double' || ev.what === 'stop' ? 'dictationButton' : 'windows';
       return `<div class="event ${ev.seq === top ? 'fresh' : ''}" data-seq="${ev.seq}">${icon(sym)}<span>${text}</span><span class="when"></span></div>`;
     }).join('') || $('t-events').innerHTML;
     lastSeq = top;
@@ -470,7 +509,7 @@ function paintTest() {
 if (host) {
   host.addEventListener('message', e => {
     const m = e.data;
-    if (m.type === 'state') { config = m.config; enabled = m.enabled; version = m.version; update = m.update; render(); }
+    if (m.type === 'state') { config = m.config; enabled = m.enabled; version = m.version; update = m.update; mediaApps = m.mediaApps || []; render(); }
     else if (m.type === 'live') { live = m; paintLive(); }
   });
   send({ type: 'ready' });
@@ -478,18 +517,19 @@ if (host) {
   // Opened in a plain browser: a demo with a finger walking along the right edge.
   version = '0.3.0';
   update = { version: '0.3.0', notes: 'Второе нажатие по силе пальца, правый клик двумя пальцами врозь', driver: '2.2' };
-  config = { leftEdge: 30, rightEdge: 20, holdMs: 400, secondPress: true, pressForce: 70, gestures: {
+  mediaApps = ['Chrome', 'T3 Code'];
+  config = { leftEdge: 30, rightEdge: 20, leftMiddle: 34, rightMiddle: 50, holdMs: 400, secondPress: true, pressForce: 70, haptic: true, mediaApp: 'chrome', gestures: {
     'left-top': { action: 'nextTrack', trigger: 'hold' }, 'left-middle': { action: 'dictationButton', trigger: 'hold' },
     'left-bottom': { action: 'prevTrack', trigger: 'hold' }, 'right-top': { action: 'volumeUp', trigger: 'click' },
     'right-middle': { action: 'playPause', trigger: 'click' }, 'right-bottom': { action: 'volumeDown', trigger: 'click' },
-    three: { action: 'middleClick', trigger: 'click' }, four: { action: 'windows', trigger: 'click' } } };
+    three: { action: 'middleClick', trigger: 'click' }, four: { action: 'otherPlayPause', trigger: 'click' } } };
   render();
   if (location.hash === '#test') $('test-toggle').click();
   let t = 0;
   setInterval(() => {
     t += 0.02;
     const y = 0.5 + 0.42 * Math.sin(t);
-    const under = 'right-' + (y < 1 / 3 ? 'top' : y > 2 / 3 ? 'bottom' : 'middle');
+    const e = (1 - config.rightMiddle / 100) / 2, under = 'right-' + (y < e ? 'top' : y > 1 - e ? 'bottom' : 'middle');
     const pressed = Math.sin(t * 3) > 0.9;
     live = { aspect: 1.503, fingers: [[0.9, y, 40 + Math.round(30 * Math.sin(t * 2))], [0.45, 0.6, pressed ? 120 : 15]], pressed, active: pressed ? under : null, waiting: false, under,
       contacts: 2, events: [{ seq: 1, slot: 'left-middle', what: 'action', action: 'middleClick' }, { seq: 2, slot: 'right-top', what: 'early', action: 'volumeUp' }],
