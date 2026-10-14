@@ -87,9 +87,11 @@ sealed class Tray : ApplicationContext
         menu.Items.Add(_enabled);
         menu.Items.Add("Проверить обновления", null, async (_, _) =>
         {
-            await Updater.Fetch();
+            bool asked = await Updater.Fetch();
             CheckUpdate();
-            if (Updater.Check() == null)
+            if (!asked)
+                _icon?.ShowBalloonTip(5000, "TrackpadClicks", "Не удалось проверить обновления: нет связи с GitHub.", ToolTipIcon.Warning);
+            else if (Updater.Check() == null)
                 _icon?.ShowBalloonTip(5000, "TrackpadClicks", $"Версия {Updater.Current} последняя.", ToolTipIcon.Info);
         });
         menu.Items.Add("Открыть лог", null, (_, _) => Process.Start(new ProcessStartInfo(Log.Path) { UseShellExecute = true }));
@@ -104,7 +106,11 @@ sealed class Tray : ApplicationContext
         timer.Tick += (_, _) =>
         {
             Watch();
-            if (_ticks++ % 10 == 0) CheckUpdate();
+            if (_ticks++ % 10 == 0)
+            {
+                CheckUpdate();
+                Ciao.Recheck();
+            }
             // GitHub: a minute after start, then every 6 hours.
             if (_ticks % 43200 == 120) _ = Updater.Fetch();
         };

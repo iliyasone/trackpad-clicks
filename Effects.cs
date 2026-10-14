@@ -60,6 +60,12 @@ static class Effects
             SendKeyEvent(VK_MENU, true);
             SetForegroundWindow(window);
             Thread.Sleep(80);
+            // Refused: the keys would land in whatever app is in front.
+            if (GetForegroundWindow() != window)
+            {
+                Log.WriteNow($"T3 Code: {label}: its window didn't come forward");
+                return;
+            }
         }
         foreach (var vk in chord) SendKeyEvent(vk, false);
         foreach (var vk in chord.Reverse()) SendKeyEvent(vk, true);

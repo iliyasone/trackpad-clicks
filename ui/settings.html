@@ -349,7 +349,7 @@ function render() {
   $('haptic').classList.toggle('on', config.haptic);
   const apps = [...new Set(['chrome', ...mediaApps.map(a => a.toLowerCase().includes('chrome') ? 'chrome' : a), config.mediaApp].filter(Boolean))];
   $('media-app').innerHTML = '<option value="">Любое (как клавиша)</option>' +
-    apps.map(a => `<option value="${a}">${a === 'chrome' ? 'Chrome' : a}</option>`).join('');
+    apps.map(a => { const o = document.createElement('option'); o.value = a; o.textContent = a === 'chrome' ? 'Chrome' : a; return o.outerHTML; }).join('');
   $('media-app').value = config.mediaApp || '';
   $('version').textContent = version ? 'версия ' + version : '';
   $('banner').classList.toggle('show', !!update);

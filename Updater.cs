@@ -134,37 +134,72 @@ static class Updater
     static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(60) };
 
     // Downloads the latest release when it is newer than this exe and than what is
-    // staged. Never on the effects worker: it waits on the network.
-    public static async Task Fetch()
+    // staged; false when GitHub couldn't be asked. Never on the effects worker: it waits
+    // on the network. One at a time: the tray's check may meet the timer's.
+    static readonly SemaphoreSlim Fetching = new(1, 1);
+
+    public static async Task<bool> Fetch()
     {
+        if (!await Fetching.WaitAsync(0)) return true;
         try
         {
+            // A driver staged by hand is installed with its exe; a release must not replace it.
+            if (Check() is { Driver: not null }) return true;
             using var request = new HttpRequestMessage(HttpMethod.Get, Releases);
             request.Headers.UserAgent.ParseAdd($"TrackpadClicks/{Current}");
             using var response = await Http.SendAsync(request);
-            if (!response.IsSuccessStatusCode) return;
+            if (!response.IsSuccessStatusCode)
+            {
+                Log.WriteNow($"update check failed: GitHub answered {(int)response.StatusCode}");
+                return false;
+            }
             using var json = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
             var root = json.RootElement;
             string version = root.GetProperty("tag_name").GetString()!.TrimStart('v');
-            if (!System.Version.TryParse(version, out var v) || !System.Version.TryParse(Current, out var c) || v <= c) return;
-            if (Check() is Pending staged && System.Version.TryParse(staged.Version, out var s) && s >= v) return;
-            string? url = root.GetProperty("assets").EnumerateArray()
-                .Where(a => a.GetProperty("name").GetString() == "TrackpadClicks.exe")
-                .Select(a => a.GetProperty("browser_download_url").GetString()).FirstOrDefault();
-            if (url == null) return;
+            if (!System.Version.TryParse(version, out var v) || !System.Version.TryParse(Current, out var c) || v <= c) return true;
+            if (Check() is Pending staged && System.Version.TryParse(staged.Version, out var s) && s >= v) return true;
+            var asset = root.GetProperty("assets").EnumerateArray()
+                .FirstOrDefault(a => a.GetProperty("name").GetString() == "TrackpadClicks.exe");
+            if (asset.ValueKind != System.Text.Json.JsonValueKind.Object) return true;
             Directory.CreateDirectory(Dir);
             string exe = Path.Combine(Dir, "TrackpadClicks.exe");
-            using (var download = await Http.GetStreamAsync(url))
+            // The whole download, not only its start, within 5 minutes.
+            using (var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(5)))
+            using (var download = await Http.GetAsync(asset.GetProperty("browser_download_url").GetString(), HttpCompletionOption.ResponseHeadersRead, timeout.Token))
             using (var file = File.Create(exe + ".part"))
-                await download.CopyToAsync(file);
+            {
+                download.EnsureSuccessStatusCode();
+                await download.Content.CopyToAsync(file, timeout.Token);
+            }
+            // GitHub's own SHA-256 of the asset: a cut-off or corrupt download is never staged.
+            string? digest = asset.TryGetProperty("digest", out var d) ? d.GetString() : null;
+            using (var sha = System.Security.Cryptography.SHA256.Create())
+            using (var file = File.OpenRead(exe + ".part"))
+            {
+                string got = "sha256:" + Convert.ToHexString(sha.ComputeHash(file)).ToLowerInvariant();
+                bool sizeOk = file.Length == asset.GetProperty("size").GetInt64();
+                if (!sizeOk || digest != null && !string.Equals(digest, got, StringComparison.OrdinalIgnoreCase))
+                {
+                    file.Close();
+                    File.Delete(exe + ".part");
+                    Log.WriteNow($"update {version}: the download doesn't match GitHub's size or digest; dropped");
+                    return false;
+                }
+            }
             File.Move(exe + ".part", exe, true);
             // Release notes: the first lines after the signature block, as plain text.
             string notes = string.Join(" ", (root.GetProperty("body").GetString() ?? "").Split('\n')
                 .Select(l => l.Trim().TrimStart('-', '*', ' ').Replace("**", "")).Where(l => l.Length > 0 && !l.StartsWith(">")).Take(3));
             File.WriteAllText(Manifest, JsonSerializer.Serialize(new Pending(version, notes, null), Settings.Json));
             Log.WriteNow($"update {version} downloaded from GitHub");
+            return true;
         }
-        catch (Exception e) { Log.WriteNow($"update check failed: {e.Message}"); }
+        catch (Exception e)
+        {
+            Log.WriteNow($"update check failed: {e.Message}");
+            return false;
+        }
+        finally { Fetching.Release(); }
     }
 
     // At start-up: the staged exe is no longer needed once it runs from the install folder.

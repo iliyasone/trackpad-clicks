@@ -27,8 +27,8 @@ shows your fingers on it live; pick a zone or a finger count, then its action:
 
 Each also has a trigger. **On click** acts on the press. **On hold** leaves a short
 click a normal click and acts only once the pad is held down for the hold time
-(400 ms by default). The pad's driver reports no finger pressure, so a hold is the
-way to tell a deliberate press from a click. The width of each edge (by default 30%
+(400 ms by default). The pad has one button and a click is a click whatever the force,
+so a hold is the way to tell a deliberate press from a click. The width of each edge (by default 30%
 of the pad on the left, 20% on the right), the height of each edge's middle zone (a
 third by default; the top and bottom zones share the rest) and the hold time are set
 there too.

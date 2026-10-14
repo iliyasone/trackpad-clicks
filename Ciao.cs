@@ -12,6 +12,7 @@ static class Ciao
 {
     public static volatile bool HandsFree;
 
+    static readonly object ReadLock = new();
     static readonly string Dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ciao");
     static FileSystemWatcher? _watcher;
 
@@ -34,7 +35,19 @@ static class Ciao
         ThreadPool.QueueUserWorkItem(_ => Read());
     }
 
+    // Every 5 s from the tray: a Ciao that crashed hands-free never says it stopped.
+    public static void Recheck()
+    {
+        if (HandsFree) ThreadPool.QueueUserWorkItem(_ => Read());
+    }
+
+    // The watcher's events, the start-up read and the recheck may overlap.
     static void Read()
+    {
+        lock (ReadLock) ReadLocked();
+    }
+
+    static void ReadLocked()
     {
         bool on = false;
         // Ciao may be mid-write: one retry.
@@ -56,7 +69,7 @@ static class Ciao
         HandsFree = on;
     }
 
-    // A Ciao that crashed leaves its last state behind.
+    // A Ciao that crashed leaves its last state behind; see Recheck.
     static bool Alive(int pid)
     {
         try { return !Process.GetProcessById(pid).HasExited; }

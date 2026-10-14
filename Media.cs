@@ -56,7 +56,8 @@ static class Media
         return true;
     }
 
-    // The app whose session last started playing, by app id; kept up by Windows' events.
+    // The app other than the music app whose session last started playing, by app id;
+    // kept up by Windows' events.
     static volatile string? _lastPlayed;
     static readonly HashSet<GlobalSystemMediaTransportControlsSession> Watched = new();
 
@@ -79,7 +80,10 @@ static class Media
                 {
                     try
                     {
-                        if (s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                        // The music app is left out: "what played last" is for the others.
+                        string app = Settings.Current.MediaApp;
+                        if (s.GetPlaybackInfo().PlaybackStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                            && (app.Length == 0 || !s.SourceAppUserModelId.Contains(app, StringComparison.OrdinalIgnoreCase)))
                             _lastPlayed = s.SourceAppUserModelId;
                     }
                     catch { }
