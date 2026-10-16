@@ -77,7 +77,8 @@ Fingers resting on the pad before a click are told apart by when each finger lan
 Two or more fingers put down together (within 150 ms) make the gesture along with
 any finger already resting, so pointing with one finger and clicking with two more is
 a three-finger click. A single finger added to resting ones more than 0.4 s after
-them is a click by that finger alone and goes to Windows as usual.
+them is a click by that finger alone: in an edge zone it is that zone's gesture and
+nothing else, wherever the other fingers rest; elsewhere it goes to Windows as usual.
 
 A thumb resting on the pad while two fingers click does not make the click a
 three-finger one: an older finger counts only if it moved shortly before. One- and
