@@ -48,6 +48,7 @@ static class Program
         Updater.Register();
         Updater.Clean();
         Worker.Start();
+        Effects.StartHolds();
         Media.Start();
         Ciao.Start();
         var gestures = new Gestures();

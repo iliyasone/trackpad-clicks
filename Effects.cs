@@ -177,6 +177,57 @@ static class Effects
         });
     }
 
+    // ---- Hold: while an edge zone holds the pad's button, the driver hides that press and
+    // its finger from Windows (IOCTL_PTPFILTER_HOLD, in the iliyasone/MagicTrackpad2ForWindows
+    // fork), so the other fingers point, scroll and swipe as if nothing were pressed. The
+    // call returns when the button comes up, so it runs on a thread of its own. Without that
+    // driver it fails at once and Windows sees the press, as before.
+
+    const uint IoctlHold = 0x0022A00C;
+    static readonly BlockingCollection<(uint Contact, int Seq)> Holds = new();
+    static Microsoft.Win32.SafeHandles.SafeFileHandle? _holdDevice;
+    static bool _holdUnsupported;
+    // Seq of the hold, and whether the button came up (false: no hold, or it was cancelled).
+    public static Action<int, bool>? HoldEnded;
+
+    public static void StartHolds() => new Thread(HoldLoop) { IsBackground = true, Name = "hold" }.Start();
+
+    // From the hook or the raw input thread: memory only.
+    public static void Hold(uint contact, int seq) => Holds.Add((contact, seq));
+
+    public static void HoldCancel()
+    {
+        if (_holdDevice is { IsInvalid: false } device) CancelIoEx(device, IntPtr.Zero);
+    }
+
+    static void HoldLoop()
+    {
+        foreach (var (contact, seq) in Holds.GetConsumingEnumerable())
+        {
+            bool released = false;
+            if (_holdDevice is not { IsInvalid: false })
+                _holdDevice = CreateFile(@"\\.\AmtPtpHapticDeviceUm", GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, IntPtr.Zero, OPEN_EXISTING, 0, IntPtr.Zero);
+            if (!_holdDevice.IsInvalid)
+            {
+                uint id = contact;
+                released = DeviceIoControl(_holdDevice, IoctlHold, ref id, 4, IntPtr.Zero, 0, out _, IntPtr.Zero);
+                int error = released ? 0 : Marshal.GetLastWin32Error();
+                // Not ready: the button was up already. Aborted: cancelled.
+                if (error == ERROR_INVALID_FUNCTION)
+                {
+                    if (!_holdUnsupported) Log.WriteNow("hold: the trackpad driver has no hold, presses stay Windows'");
+                    _holdUnsupported = true;
+                }
+                else if (error is not (0 or ERROR_NOT_READY or ERROR_OPERATION_ABORTED))
+                {
+                    Log.WriteNow($"hold failed {error}");
+                    _holdDevice.Dispose();
+                }
+            }
+            HoldEnded?.Invoke(seq, released);
+        }
+    }
+
     // ---- Haptics: a click under the finger, through the Magic Trackpad driver's
     // \\.\AmtPtpHapticDeviceUm (IOCTL_PTPFILTER_ACTUATE, from the change proposed in
     // vitoplantamura/MagicTrackpad2ForWindows#63). Without that driver, nothing happens.

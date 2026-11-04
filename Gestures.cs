@@ -23,6 +23,9 @@
 // On a dictation zone a quick double click taps mouse button 5 instead: hands-free
 // dictation in Ciao on. While it is on (Ciao.cs), a single click taps it: off.
 //
+// While an edge zone is pressed, the Magic Trackpad driver from the iliyasone fork hides
+// that press and its finger from Windows (Effects.Hold): the other fingers point, scroll and swipe as if nothing were pressed.
+//
 // Second press: while an edge zone holds a mouse button, the pad's one button is
 // already down, so another finger pressing gives no new click. With driver 2.2+ each
 // finger reports its pressure: another finger pressing past PressForce presses the left
@@ -106,6 +109,12 @@ sealed class Gestures
     long _earlyAt, _startAt;
     const long DoubleMs = 400;
 
+    // The driver hides this press and its finger from Windows (Effects.Hold), so the rest
+    // of the pad works as if nothing were pressed. Its reports then show the button up: the
+    // hold ending says when it really came up.
+    bool _held;
+    int _holdSeq;
+
     // The volume key held, or 0.
     ushort _repeatKey;
     readonly System.Threading.Timer _repeat;
@@ -127,6 +136,10 @@ sealed class Gestures
 
     public Gestures()
     {
+        Effects.HoldEnded = (seq, released) =>
+        {
+            lock (Sync) HoldEnded(seq, released);
+        };
         _repeat = new System.Threading.Timer(_ =>
         {
             lock (Sync)
@@ -160,6 +173,8 @@ sealed class Gestures
             _upPending = false;
             Effects.Mouse(_buttonUp, _buttonData);
         }
+        if (_held) Effects.HoldCancel();
+        _held = false;
         _mode = Mode.None;
         _modePad = null;
         _repeatKey = 0;
@@ -187,7 +202,7 @@ sealed class Gestures
             Note(pad.Contacts >= 4 ? "four" : "three", "windows");
             Log.Write($"{pad.Contacts} fingers, counted {ClickFingers(pad)} (landed {pad.LandingsText} ms before the last), left to Windows");
         }
-        else if (!button && pad.Button && pad == _modePad)
+        else if (!button && pad.Button && pad == _modePad && !_held)
         {
             End();
         }
@@ -226,8 +241,9 @@ sealed class Gestures
         }
         else if (msg is WM_LBUTTONUP or WM_RBUTTONUP && _swallowing)
         {
+            // Held: Windows lets go because the driver hid the press, not the pad.
             _swallowing = false;
-            End();
+            if (!_held) End();
             return true;
         }
         return false;
@@ -309,6 +325,8 @@ sealed class Gestures
         EdgeSlot(pad, Settings.Current, out _holdFinger);
         _second = 0;
         _secondSince = 0;
+        _held = slot.Contains('-');
+        if (_held) Effects.Hold(_holdFinger, ++_holdSeq);
         if (binding.Trigger == Trigger.Hold)
         {
             _mode = Mode.Waiting;
@@ -417,6 +435,16 @@ sealed class Gestures
         _repeatKey = 0;
         _mode = Mode.None;
         _modePad = null;
+    }
+
+    void HoldEnded(int seq, bool released)
+    {
+        if (seq != _holdSeq || !_held) return;
+        _held = false;
+        // Released; or no hold after all, and the reports show the press as it is. Windows
+        // may never have seen a hidden press: a click let go early is still replayed.
+        if (released) _pressSeen = true;
+        if (_modePad != null && (released || !_modePad.Button)) End();
     }
 
     void SecondPress(Pad pad)

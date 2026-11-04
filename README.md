@@ -33,6 +33,13 @@ of the pad on the left, 20% on the right), the height of each edge's middle zone
 third by default; the top and bottom zones share the rest) and the hold time are set
 there too.
 
+**The rest of the pad keeps working.** With the Magic Trackpad driver from
+[the iliyasone fork](https://github.com/iliyasone/MagicTrackpad2ForWindows/tree/edge-hold),
+the driver hides a press in an edge zone and its finger from Windows until the button
+comes up. Held on the left edge for dictation, the other fingers still move the cursor,
+scroll and switch desktops with four fingers; the finger on the edge moves nothing. With
+another driver Windows sees the press: moving fingers drag, and swipes don't work.
+
 **Second press.** While an edge zone holds the middle button, the pad's one button is
 already down, so pressing another finger makes no new click. With Magic Trackpad
 driver 2.2 or later, which reports each finger's pressure, another finger pressing past

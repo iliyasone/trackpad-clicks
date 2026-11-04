@@ -148,4 +148,9 @@ static class Native
     [DllImport("kernel32.dll", SetLastError = true)]
     public static extern bool DeviceIoControl(Microsoft.Win32.SafeHandles.SafeFileHandle device, uint code, ref uint input, uint inputSize,
         IntPtr output, uint outputSize, out uint returned, IntPtr overlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool CancelIoEx(Microsoft.Win32.SafeHandles.SafeFileHandle file, IntPtr overlapped);
+
+    public const int ERROR_INVALID_FUNCTION = 1, ERROR_NOT_READY = 21, ERROR_OPERATION_ABORTED = 995;
 }
