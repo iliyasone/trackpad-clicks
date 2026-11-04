@@ -23,6 +23,8 @@ try {
     bcdedit /set testsigning on
     if ($LASTEXITCODE) { exit 21 }
     foreach ($store in 'Root', 'TrustedPublisher') { Import-Certificate -FilePath $cer.FullName -CertStoreLocation "Cert:\LocalMachine\$store" | Out-Null }
+    # TrackpadClicks runs without admin rights: let it open the haptic device (clicks, holds).
+    reg add 'HKLM\SYSTEM\CurrentControlSet\Services\AmtPtpHidFilter\Parameters' /v AllowNonAdminAccess /t REG_DWORD /d 1 /f | Out-Null
     pnputil /add-driver $inf.FullName /install
     if ($LASTEXITCODE -notin 0, 3010) { exit $LASTEXITCODE }
     exit 3010
