@@ -29,7 +29,8 @@
 // Second press: while an edge zone holds a mouse button, the pad's one button is
 // already down, so another finger pressing gives no new click. With driver 2.2+ each
 // finger reports its pressure: another finger pressing past PressForce presses the left
-// button (two fingers: the right one) until it eases off to 60% of that.
+// button (two fingers: the right one) until it eases off to 60% of that. Three or more
+// other fingers are a swipe and press nothing.
 // Click with 2 fingers: Windows makes it a left press (one finger holds the click, the
 // other drags a selection) or a right click, and which one the user means is not known
 // at press time. So the press is held back and the fingers decide:
@@ -86,11 +87,12 @@ sealed class Gestures
     const string AgentVoiceApp = "t3";
 
     // Second press: the finger holding the edge, the button pressed by others (0 none,
-    // 1 left, 2 right), and since when one finger presses (to wait for a second one).
+    // 1 left, 2 right), and since when a finger presses: a press waits SecondPairMs for a
+    // second finger (a right click) or for more (a swipe, no click).
     uint _holdFinger;
     int _second;
     long _secondSince;
-    const long SecondPairMs = 60;
+    const long SecondPairMs = 80;
 
     // The mouse button a Button gesture holds, when it went down, and whether its up is
     // put off to MinHeldMs. Ciao takes a press under 0.35 s for a tap that starts
@@ -452,23 +454,28 @@ sealed class Gestures
         var config = Settings.Current;
         if (!config.SecondPress) return;
         double threshold = _second == 0 ? config.PressForce : config.PressForce * 0.6;
-        int pressing = 0;
+        int pressing = 0, touching = 0;
         for (int i = 0; i < pad.YFingers; i++)
-            if (pad.Ids[i] != _holdFinger && pad.Pressures[i] >= threshold) pressing++;
+            if (pad.Ids[i] != _holdFinger)
+            {
+                touching++;
+                if (pad.Pressures[i] >= threshold) pressing++;
+            }
         long now = Environment.TickCount64;
         if (_second != 0)
         {
             if (pressing == 0) EndSecond();
             return;
         }
-        if (pressing == 0)
+        // Three or more other fingers: a swipe between desktops, whose fingers land hard.
+        if (pressing == 0 || touching > 2)
         {
             _secondSince = 0;
             return;
         }
         if (_secondSince == 0) _secondSince = now;
-        // One finger: wait a moment for a second one, which makes it a right click.
-        if (pressing < 2 && now - _secondSince < SecondPairMs) return;
+        // Wait a moment: a second finger makes it a right click, more make it a swipe.
+        if (now - _secondSince < SecondPairMs) return;
         _second = pressing >= 2 ? 2 : 1;
         Effects.Mouse(_second == 2 ? MOUSEEVENTF_RIGHTDOWN : MOUSEEVENTF_LEFTDOWN);
         if (config.Haptic) Effects.Haptic(0x060617);
