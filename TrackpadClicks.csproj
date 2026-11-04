@@ -9,15 +9,16 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>TrackpadClicks</AssemblyName>
     <RootNamespace>TrackpadClicks</RootNamespace>
-    <Version>0.4.8</Version>
+    <Version>0.4.9</Version>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <!-- WebView2Loader.dll goes inside the single-file exe too. -->
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <!-- The WebView2 package also brings its WPF control, unused here, built against a newer WindowsBase. -->
     <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="ui/settings.html" LogicalName="settings.html" />
+    <!-- Written out next to the settings by SettingsWindow: a copy extracted to %TEMP% is
+         deleted by Windows' temp cleanup while the app runs for days. -->
+    <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2/1.0.4258.31/runtimes/win-x64/native/WebView2Loader.dll" LogicalName="WebView2Loader.dll" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
