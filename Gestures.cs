@@ -3,8 +3,9 @@
 // in memory; anything that touches the system goes through Effects.
 //
 // Fingers resting on the pad before the click are told apart by when each landed and
-// whether it moved since; see ClickFingers. With two fingers resting, a click by a
-// third goes to Windows.
+// whether it moved since; see ClickFingers. A finger landing well after the resting
+// ones clicks alone: in an edge zone it is that zone's gesture, wherever the others
+// rest; elsewhere the click goes to Windows.
 //
 // What a click does comes from the settings (Settings.cs): a click with 3 or with 4
 // fingers, and a click with 1 finger (a thumb, say) in one of six edge zones — the left
@@ -177,7 +178,7 @@ sealed class Gestures
             pad.Button = button;
             return;
         }
-        if (button && !pad.Button && Find(pad) is string slot)
+        if (button && !pad.Button && _drag == Drag.None && Find(pad) is string slot)
         {
             Start(pad, slot);
         }
@@ -259,21 +260,39 @@ sealed class Gestures
     static string? Find(Pad pad)
     {
         var config = Settings.Current;
-        string? slot = pad.Contacts == 1 ? EdgeSlot(pad, config)
-            : pad.Contacts >= 3 ? ClickFingers(pad) switch { 3 => "three", 4 => "four", _ => null }
-            : null;
+        string? slot = EdgeSlot(pad, config, out _)
+            ?? (pad.Contacts >= 3 ? ClickFingers(pad) switch { 3 => "three", 4 => "four", _ => null } : null);
         return slot != null && config.For(slot).Action != GestureAction.Windows ? slot : null;
     }
 
-    // The edge zone under a single finger, or null away from the edges.
-    public static string? EdgeSlot(Pad pad, Config config)
+    // The edge zone a click is made in, and the finger making it: a lone finger, or one
+    // that landed more than SameMotionMs after the fingers resting on the pad (their
+    // place doesn't matter: a click is that finger's, see ClickFingers). Null away from
+    // the edges.
+    public static string? EdgeSlot(Pad pad, Config config, out uint finger)
     {
-        if (pad.YFingers != 1) return null;
-        double x = (pad.Xs[0] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
+        finger = 0;
+        int n = pad.YFingers;
+        if (n == 0 || n != pad.Contacts || n > Pad.MaxFingers) return null;
+        int last = 0;
+        for (int i = 1; i < n; i++)
+            if (LandedAt(pad, i) > LandedAt(pad, last)) last = i;
+        for (int i = 0; i < n; i++)
+            if (i != last && LandedAt(pad, last) - LandedAt(pad, i) <= SameMotionMs) return null;
+        finger = pad.Ids[last];
+        return Zone(pad, last, config);
+    }
+
+    static long LandedAt(Pad pad, int i) => pad.Landed.TryGetValue(pad.Ids[i], out var at) ? at : pad.LastReport;
+
+    // The edge zone under finger i, or null away from the edges.
+    static string? Zone(Pad pad, int i, Config config)
+    {
+        double x = (pad.Xs[i] - pad.XMin) / Math.Max(1, pad.XMax - pad.XMin);
         string side = x <= config.LeftEdge / 100.0 ? "left" : x >= 1 - config.RightEdge / 100.0 ? "right" : "";
         if (side == "") return null;
         // Y grows downward; the middle zone is centered, its height set per side.
-        double y = (pad.Ys[0] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
+        double y = (pad.Ys[i] - pad.YMin) / Math.Max(1, pad.YMax - pad.YMin);
         double edge = (1 - (side == "left" ? config.LeftMiddle : config.RightMiddle) / 100.0) / 2;
         return side + (y < edge ? "-top" : y > 1 - edge ? "-bottom" : "-middle");
     }
@@ -287,7 +306,7 @@ sealed class Gestures
         _action = binding.Action;
         _pressSeen = false;
         _startAt = Environment.TickCount64;
-        _holdFinger = pad.Ids[0];
+        EdgeSlot(pad, Settings.Current, out _holdFinger);
         _second = 0;
         _secondSince = 0;
         if (binding.Trigger == Trigger.Hold)
@@ -467,7 +486,7 @@ sealed class Gestures
             fingers[i] = new[] { (pad.Xs[i] - pad.XMin) / w, (pad.Ys[i] - pad.YMin) / h, pad.Pressures[i] };
         string? active = pad == _modePad ? _slot : null;
         return new Live(w / h, fingers, pad.Button, active, _mode == Mode.Waiting,
-            pad.Contacts == 1 ? EdgeSlot(pad, Settings.Current) : null, pad.Contacts,
+            EdgeSlot(pad, Settings.Current, out _), pad.Contacts,
             _events.ToArray(), pad.Raw == null ? null : Convert.ToHexString(pad.Raw));
     }
 
@@ -486,7 +505,8 @@ sealed class Gestures
                 _swallowUp = false;
                 return true;
             }
-            var pad = down ? FreshPad(p => p.Contacts == 2) : null;
+            // An edge click with a finger resting is the edge's (Find), not two fingers'.
+            var pad = down ? FreshPad(p => p.Contacts == 2 && Find(p) == null) : null;
             if (pad == null || !Movable(info.X, info.Y)) return false;
             _drag = Drag.Pending;
             _dragPad = pad;
