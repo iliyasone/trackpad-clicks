@@ -44,7 +44,7 @@ another driver Windows sees the press: moving fingers drag, and swipes don't wor
 already down, so pressing another finger makes no new click. With Magic Trackpad
 driver 2.2 or later, which reports each finger's pressure, another finger pressing past
 the set force presses the left button, two fingers the right one, until they ease off.
-On by default; the force is a slider. The test panel shows each finger's pressure.
+Three or more fingers are a swipe and press nothing. On by default; the force is a slider. The test panel shows each finger's pressure.
 With a driver that has the haptic command proposed in
 [MagicTrackpad2ForWindows#63](https://github.com/vitoplantamura/MagicTrackpad2ForWindows/pull/63),
 the pad also clicks under the finger on the second press and its release.
