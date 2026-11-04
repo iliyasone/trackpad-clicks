@@ -47,12 +47,32 @@ sealed class SettingsWindow : Form
         };
     }
 
+    static bool _loaderSet;
+
+    // WebView2Loader.dll, from the exe into dir: written when missing or from another version.
+    static void Loader(string dir)
+    {
+        if (_loaderSet) return;
+        using var dll = typeof(SettingsWindow).Assembly.GetManifestResourceStream("WebView2Loader.dll")!;
+        var file = new FileInfo(Path.Combine(dir, "WebView2Loader.dll"));
+        if (!file.Exists || file.Length != dll.Length)
+        {
+            Directory.CreateDirectory(dir);
+            string temp = file.FullName + ".new";
+            using (var output = File.Create(temp)) dll.CopyTo(output);
+            File.Move(temp, file.FullName, true);
+        }
+        CoreWebView2Environment.SetLoaderDllFolderPath(dir);
+        _loaderSet = true;
+    }
+
     async Task Start()
     {
         try
         {
-            var data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TrackpadClicks", "WebView2");
-            await _web.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(null, data));
+            var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "TrackpadClicks");
+            Loader(dir);
+            await _web.EnsureCoreWebView2Async(await CoreWebView2Environment.CreateAsync(null, Path.Combine(dir, "WebView2")));
         }
         catch (Exception e)
         {
