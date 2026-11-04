@@ -9,8 +9,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>TrackpadClicks</AssemblyName>
     <RootNamespace>TrackpadClicks</RootNamespace>
-    <Version>0.4.9</Version>
-    <InvariantGlobalization>true</InvariantGlobalization>
+    <Version>0.4.10</Version>
     <!-- The WebView2 package also brings its WPF control, unused here, built against a newer WindowsBase. -->
     <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
   </PropertyGroup>
