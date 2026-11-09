@@ -16,7 +16,7 @@ if (Test-Path C:\TrackpadClicks\TrackpadClicks.exe) { Rename-Item C:\TrackpadCli
 Move-Item "$env:USERPROFILE\TrackpadClicks.exe" C:\TrackpadClicks\TrackpadClicks.exe -Force
 $a = New-ScheduledTaskAction -Execute 'C:\TrackpadClicks\TrackpadClicks.exe'
 $t = New-ScheduledTaskTrigger -AtLogOn -User 'iliya'
-$p = New-ScheduledTaskPrincipal -UserId 'iliya' -LogonType Interactive -RunLevel Limited
+$p = New-ScheduledTaskPrincipal -UserId 'iliya' -LogonType Interactive -RunLevel Highest
 $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName 'TrackpadClicks' -Action $a -Trigger $t -Principal $p -Settings $s -Force | Out-Null
 Remove-Item C:\TrackpadClicks\debug -ErrorAction SilentlyContinue; Remove-Item "$env:LOCALAPPDATA\TrackpadClicks\log.txt" -ErrorAction SilentlyContinue
