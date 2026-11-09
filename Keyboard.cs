@@ -38,6 +38,8 @@ static class Keyboard
     static IntPtr _hook;
     // Keys held now whose press the hook took: their repeats and release are taken too.
     static readonly HashSet<uint> Taken = new();
+    // F-keys and media keys held now that were left alone, logged once per press.
+    static readonly HashSet<uint> Passed = new();
     static volatile bool _brightnessBusy;
 
     public static void Start()
@@ -58,7 +60,11 @@ static class Keyboard
         if (code >= 0 && Gestures.Enabled)
         {
             var k = Marshal.PtrToStructure<KBDLLHOOKSTRUCT>(lParam);
-            if ((k.Flags & LLKHF_INJECTED) == 0 && Take(k.VkCode, (int)wParam is WM_KEYDOWN or WM_SYSKEYDOWN)) return 1;
+            bool down = (int)wParam is WM_KEYDOWN or WM_SYSKEYDOWN;
+            if ((k.Flags & LLKHF_INJECTED) == 0) { if (Take(k.VkCode, down)) return 1; }
+            // An F-key another program sent, in the log (once per press).
+            else if (k.VkCode is >= 0x70 and <= 0x87 && (down ? Passed.Add(k.VkCode) : Passed.Remove(k.VkCode)) && down)
+                Log.Write($"key 0x{k.VkCode:X2} sent by a program");
         }
         return CallNextHookEx(_hook, code, wParam, lParam);
     }
@@ -68,7 +74,11 @@ static class Keyboard
     // True to swallow the key.
     static bool Take(uint vk, bool down)
     {
-        if (!down) return Taken.Remove(vk);
+        if (!down)
+        {
+            Passed.Remove(vk);
+            return Taken.Remove(vk);
+        }
         bool repeat = Taken.Contains(vk);
         bool ctrl = Held(VK_CONTROL), alt = Held(VK_MENU), shift = Held(VK_SHIFT), win = Held(VK_LWIN) || Held(VK_RWIN);
         string? what = null;
@@ -102,7 +112,13 @@ static class Keyboard
             what = "screen part picture";
             if (!repeat) Chord(release: Array.Empty<int>(), 'S');
         }
-        if (what == null) return false;
+        if (what == null)
+        {
+            // Which key a keyboard really sends for a top-row key, in the log.
+            if (vk is >= 0x70 and <= 0x87 or >= 0xA6 and <= 0xB7 && Passed.Add(vk))
+                Log.Write($"key 0x{vk:X2} left alone{(ctrl ? " ctrl" : "")}{(alt ? " alt" : "")}{(shift ? " shift" : "")}{(win ? " win" : "")}");
+            return false;
+        }
         Taken.Add(vk);
         if (!repeat) Log.Write($"key 0x{vk:X2}: {what}");
         return true;
