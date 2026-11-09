@@ -115,7 +115,10 @@ Builds on Linux too (`EnableWindowsTargeting`). The result is `out/TrackpadClick
 
 Start `TrackpadClicks.exe` in the signed-in user's session. To start it at logon,
 create a Task Scheduler task with an *At log on* trigger, running as that user with
-*Run only when user is logged on*. Only one copy runs at a time; extra copies exit.
+*Run only when user is logged on* and *Run with highest privileges*. Windows drops
+clicks that a program without administrator rights sends to one that has them, so
+without that last option the middle click does nothing in programs running as
+administrator. Only one copy runs at a time; extra copies exit.
 
 The tray icon (a small trackpad) shows the state and has a menu: turn gestures on or
 off, open the log, restart, exit. The icon is white when gestures are on, grey when
