@@ -1,8 +1,9 @@
 // TrackpadClicks: Mac-like physical-click gestures for a Magic Trackpad on Windows
 // (what each click does: Gestures.cs). Taps are off in Windows settings.
 //
-// Four threads, so that nothing can make the mouse lag:
+// Five threads, so that nothing can make the mouse or the keyboard lag:
 //   mouse hook  — decides swallow/pass from memory only (MouseHook.cs);
+//   key hook    — the same for an Apple keyboard's top row (Keyboard.cs);
 //   raw input   — reads the touchpads' HID reports (RawInput.cs);
 //   effects     — SendInput, volume, window moves, the log (Effects.cs);
 //   UI          — the tray icon, the settings window, and the watch over the other two.
@@ -54,6 +55,7 @@ static class Program
         var gestures = new Gestures();
         RawInput.Start(gestures);
         MouseHook.Start(gestures);
+        Keyboard.Start();
         Application.Run(new Tray(gestures));
     }
 }

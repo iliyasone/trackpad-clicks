@@ -91,6 +91,26 @@ A thumb resting on the pad while two fingers click does not make the click a
 three-finger one: an older finger counts only if it moved shortly before. One- and
 two-finger clicks away from the edges work as usual.
 
+## Apple keyboard
+
+An Apple keyboard's top row does what is drawn on its keys, as on a Mac. Windows never
+sees such a keyboard's fn key (it comes inside the keyboard's own report, which only
+Windows' keyboard driver reads), so the keys always do this:
+
+| Key | What it does |
+| --- | --- |
+| F1, F2 | Screen brightness down, up (a laptop's own screen; held, it goes on) |
+| F3 | [Lanes](https://github.com/iliyasone/lanes)' overview, or Task View without Lanes |
+| F7, F8, F9 | Previous, play/pause, next |
+| F10, F11, F12 | Mute, volume down, volume up (held, it goes on) |
+| Ctrl+Cmd+F | Full screen (F11) |
+| Cmd+Shift+3 | A picture of the screen, saved to Pictures\Screenshots (Win+Print Screen) |
+| Cmd+Shift+4, Cmd+Shift+5 | A picture of a part of the screen (Win+Shift+S) |
+
+Cmd is the Windows key. F4, F5 and F6 stay F-keys, and so does any F-key pressed with
+Ctrl, Alt, Shift or Win. It applies to every keyboard, a laptop's own too. With gestures
+off in the tray menu, keys pass as they are.
+
 ## Requirements
 
 - Windows 11 with the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0).
