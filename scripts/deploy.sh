@@ -3,7 +3,7 @@
 set -e
 K="-o KexAlgorithms=curve25519-sha256@libssh.org,curve25519-sha256"
 cd "$(dirname "$0")/.."
-~/.dotnet/dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o out >/dev/null
+~/.dotnet/dotnet publish -c Release -o out >/dev/null
 scp -q $K out/TrackpadClicks.exe wsl:/tmp/
 cat > /tmp/trackpad-install.ps1 <<'PS'
 $ProgressPreference = 'SilentlyContinue'
