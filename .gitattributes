@@ -1,0 +1,2 @@
+# The catalogs hash the INF files byte for byte.
+driver/** -text

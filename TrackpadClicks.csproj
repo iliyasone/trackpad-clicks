@@ -9,12 +9,21 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>TrackpadClicks</AssemblyName>
     <RootNamespace>TrackpadClicks</RootNamespace>
-    <Version>0.5.0</Version>
+    <Version>0.6.0</Version>
+    <!-- One exe that runs on a bare Windows 10 or 11: the .NET runtime inside it. -->
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
     <!-- The WebView2 package also brings its WPF control, unused here, built against a newer WindowsBase. -->
     <MSBuildWarningsAsMessages>MSB3277</MSBuildWarningsAsMessages>
   </PropertyGroup>
   <ItemGroup>
     <EmbeddedResource Include="ui/settings.html" LogicalName="settings.html" />
+    <!-- The Magic Trackpad driver package that Install.cs installs; see driver/README.md. -->
+    <EmbeddedResource Include="driver/win10/*" LogicalName="driver/win10/%(Filename)%(Extension)" />
+    <EmbeddedResource Include="driver/win11/*" LogicalName="driver/win11/%(Filename)%(Extension)" />
     <!-- Written out next to the settings by SettingsWindow: a copy extracted to %TEMP% is
          deleted by Windows' temp cleanup while the app runs for days. -->
     <EmbeddedResource Include="$(NuGetPackageRoot)microsoft.web.webview2/1.0.4258.31/runtimes/win-x64/native/WebView2Loader.dll" LogicalName="WebView2Loader.dll" />

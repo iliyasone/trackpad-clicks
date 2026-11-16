@@ -29,15 +29,29 @@ static class Program
             return;
         }
 
+        // Started from a download: install (Install.cs).
+        if (args.Length == 2 && args[0] == "--install")
+        {
+            Install.Run(args[1]);
+            return;
+        }
+        if (args.Length == 0 && Install.Needed)
+        {
+            Install.Ask();
+            return;
+        }
+
         // One instance. Not a mutex: a copy wedged in the kernel keeps its mutex but
-        // reports HasExited, and must not block its replacement.
+        // reports HasExited, and must not block its replacement. A copy elsewhere is the
+        // installer that has just started this one.
         int replacing = args.Length == 2 && args[0] == "--replace" ? int.Parse(args[1]) : 0;
         int me = Environment.ProcessId;
         foreach (var other in Process.GetProcessesByName("TrackpadClicks"))
         {
             try
             {
-                if (other.Id != me && other.Id != replacing && !other.HasExited) return;
+                if (other.Id != me && other.Id != replacing && !other.HasExited
+                    && string.Equals(other.MainModule?.FileName, Environment.ProcessPath, StringComparison.OrdinalIgnoreCase)) return;
             }
             catch { }
         }

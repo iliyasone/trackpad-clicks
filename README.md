@@ -111,31 +111,44 @@ Cmd is the Windows key. F4, F5 and F6 stay F-keys, and so does any F-key pressed
 Ctrl, Alt, Shift or Win. It applies to every keyboard, a laptop's own too. With gestures
 off in the tray menu, keys pass as they are.
 
-## Requirements
+## Install
 
-- Windows 11 with the [.NET 8 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/8.0).
-  The settings window uses the Microsoft Edge WebView2 Runtime, which Windows 11 has.
-- The touchpad must be a Windows *precision touchpad*. A Magic Trackpad becomes one
-  with the [mac-precision-touchpad](https://github.com/imbushuo/mac-precision-touchpad)
-  driver.
-- Taps turned off in **Settings → Bluetooth & devices → Touchpad → Taps**, and
-  three- and four-finger taps set to **Nothing** — TrackpadClicks only handles clicks.
-  Under **Advanced gestures**, set the four-finger swipes up and down to **Nothing**,
-  or Windows changes the volume on a plain swipe as well.
+Download `TrackpadClicks.exe` from the [latest release](https://github.com/iliyasone/trackpad-clicks/releases/latest)
+and run it, on Windows 10 or 11 (x64). It asks once for administrator rights and then:
+
+- installs the Magic Trackpad precision-touchpad driver it carries
+  ([MagicTrackpad2ForWindows](https://github.com/vitoplantamura/MagicTrackpad2ForWindows) v2.3,
+  see [driver/README.md](driver/README.md)), unless that version or a newer one is
+  already installed. On Windows 10 it first trusts the driver's own certificate, which
+  signs that package's catalog. Remove an older driver for the pad (Apple's, Magic
+  Utilities, Trackpad++, mac-precision-touchpad 1.x) before;
+- installs the Microsoft Edge WebView2 Runtime for the settings window if Windows has
+  none;
+- copies itself to `C:\TrackpadClicks`, starts at your logon with highest privileges
+  (see **Run**), and starts now.
+
+The .NET runtime is inside the exe. Then turn taps off in **Settings → Bluetooth &
+devices → Touchpad → Taps** (on Windows 10: **Settings → Devices → Touchpad**), and
+set three- and four-finger taps to **Nothing** — TrackpadClicks only handles clicks.
+Under the three- and four-finger gestures, set the four-finger swipes up and down to
+**Nothing**, or Windows changes the volume on a plain swipe as well.
 
 ## Build
 
 ```sh
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o out
+dotnet publish -c Release -o out
 ```
 
-Builds on Linux too (`EnableWindowsTargeting`). The result is `out/TrackpadClicks.exe`.
+Builds on Linux too (`EnableWindowsTargeting`). The result is `out/TrackpadClicks.exe`,
+self-contained (the .NET runtime and the driver package inside); the other files in
+`out` are not needed.
 
 ## Run
 
-Start `TrackpadClicks.exe` in the signed-in user's session. To start it at logon,
-create a Task Scheduler task with an *At log on* trigger, running as that user with
-*Run only when user is logged on* and *Run with highest privileges*. Windows drops
+Run from `C:\TrackpadClicks`, `TrackpadClicks.exe` is the app; from anywhere else it
+is the installer above. The installer creates a Task Scheduler task with an *At log on*
+trigger, running as the user with *Run only when user is logged on* and *Run with
+highest privileges*. Windows drops
 clicks that a program without administrator rights sends to one that has them, so
 without that last option the middle click does nothing in programs running as
 administrator. Only one copy runs at a time; extra copies exit.
